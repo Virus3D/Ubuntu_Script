@@ -34,7 +34,7 @@ sudo apt autoremove -y && sudo apt clean
 
 # --- 2. Базовые инструменты (если нет) ---
 echo "🛠 Устанавливаем базовые утилиты..."
-BASE_TOOLS=(curl wget git vim unzip zip htop net-tools)
+BASE_TOOLS=(mc curl wget git vim unzip zip htop net-tools)
 for tool in "${BASE_TOOLS[@]}"; do
     if ! package_installed "$tool"; then
         sudo apt install -y "$tool"
@@ -74,10 +74,10 @@ echo "Запустите 'sudo mysql_secure_installation' для безопас�
 # --- 5. PHP и модули (с версией из переменной) ---
 echo "⚙️ Устанавливаем PHP $PHP_VERSION и модули..."
 PHP_PACKAGES=(
-    "php$PHP_VERSION" "php$PHP_VERSION-fpm" "php$PHP_VERSION-cli" "php$PHP_VERSION-mysql"
+    "php$PHP_VERSION-fpm" "php$PHP_VERSION-cli" "php$PHP_VERSION-mysql"
     "php$PHP_VERSION-gd" "php$PHP_VERSION-xml" "php$PHP_VERSION-mbstring"
     "php$PHP_VERSION-curl" "php$PHP_VERSION-zip" "php$PHP_VERSION-bcmath"
-    "php$PHP_VERSION-json" "php$PHP_VERSION-intl" "php$PHP_VERSION-opcache"
+    "php$PHP_VERSION-intl" "php$PHP_VERSION-opcache"
 )
 for pkg in "${PHP_PACKAGES[@]}"; do
     if ! package_installed "$pkg"; then
