@@ -3,14 +3,11 @@
 
 
 ## Yandex repository
+
 ``` shell
-curl -fsSL https://repo.yandex.ru/yandex-browser/YANDEX-BROWSER-KEY.GPG | sudo gpg --dearmor -o /etc/apt/keyrings/yandex-browser.gpg
+sudo wget -O /etc/apt/trusted.gpg.d/yandex-browser.asc https://repo.yandex.ru/yandex-browser/YANDEX-BROWSER-KEY.GPG
 ```
 
 ``` shell
-sudo wget -qO https://repo.yandex.ru/yandex-browser/YANDEX-BROWSER-KEY.GPG /etc/apt/trusted.gpg.d/yandex-browser.asc
-```
-
-``` shell
-deb [arch=amd64] http://repo.yandex.ru/yandex-browser/deb stable main" | sudo tee /etc/apt/sources.list.d/yandex-stable.list
+ echo "deb [arch=amd64] http://repo.yandex.ru/yandex-browser/deb stable main" | sudo tee /etc/apt/sources.list.d/yandex-stable.list
 ```
