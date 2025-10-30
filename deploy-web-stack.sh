@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # ========================================================
-# Скрипт развёртывания веб‑среды для Symfony и Bitrix24
-# Ubuntu 25.10 | Поддомены localhost | PHP-версия через переменную
+# Скрипт развёртывания веб‑среды для разработки
+# Ubuntu 25.10 | PHP-версия через переменную
 # Автор: Ваш Имя
 # Дата: 2025-10-29
 # ========================================================
@@ -11,12 +11,9 @@ set -e  # Прекращать выполнение при ошибке
 
 # --- Параметры ---
 PHP_VERSION="8.4"           # Меняйте здесь: 8.2, 8.4 и т. п.
-WEB_ROOT="/var/www"            # Корень веб‑проектов
-NGINX_CONF="/etc/nginx/sites-available"
-NGINX_ENABLED="/etc/nginx/sites-enabled"
 
-echo "🚀 Запуск скрипта развёртывания веб‑среды для Symfony/Bitrix24..."
-echo "PHP версия: $PHP_VERSION | Веб‑корень: $WEB_ROOT"
+echo "🚀 Запуск скрипта развёртывания веб‑среды для разработки"
+echo "PHP версия: $PHP_VERSION"
 
 # --- Функции ---
 package_installed() {
@@ -34,7 +31,7 @@ sudo apt autoremove -y && sudo apt clean
 
 # --- 2. Базовые инструменты (если нет) ---
 echo "🛠 Устанавливаем базовые утилиты..."
-BASE_TOOLS=(mc curl wget git vim unzip zip htop net-tools)
+BASE_TOOLS=(mc curl wget git vim unzip zip htop net-tools build-essential ca-certificates gnupg)
 for tool in "${BASE_TOOLS[@]}"; do
     if ! package_installed "$tool"; then
         sudo apt install -y "$tool"
@@ -48,6 +45,7 @@ echo "🌐 Устанавливаем Nginx..."
 if ! package_installed "nginx"; then
     sudo apt install -y nginx
     sudo systemctl enable nginx
+    sudo systemctl start nginx
 else
     echo "Nginx уже установлен ✅"
 fi
@@ -69,15 +67,33 @@ if ! package_installed "mariadb-server"; then
 else
     echo "MariaDB уже установлена ✅"
 fi
-echo "Запустите 'sudo mysql_secure_installation' для безопасности."
+
+# Автоматическая настройка безопасности MariaDB
+echo "🔒 Настраиваем безопасность MariaDB..."
+sudo mysql -e "DELETE FROM mysql.user WHERE User='';"
+sudo mysql -e "DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost', '127.0.0.1', '::1');"
+sudo mysql -e "DROP DATABASE IF EXISTS test;"
+sudo mysql -e "DELETE FROM mysql.db WHERE Db='test' OR Db='test\\_%';"
+sudo mysql -e "FLUSH PRIVILEGES;"
+echo "Базовая безопасность MariaDB настроена ✅"
 
 # --- 5. PHP и модули (с версией из переменной) ---
 echo "⚙️ Устанавливаем PHP $PHP_VERSION и модули..."
+
+# Добавляем репозиторий PHP если нужно
+if ! apt-cache policy php$PHP_VERSION-fpm | grep -q "Candidate"; then
+    echo "Добавляем репозиторий PHP..."
+    sudo apt install -y software-properties-common
+    sudo add-apt-repository -y ppa:ondrej/php
+    sudo apt update
+fi
+
 PHP_PACKAGES=(
     "php$PHP_VERSION-fpm" "php$PHP_VERSION-cli" "php$PHP_VERSION-mysql"
     "php$PHP_VERSION-gd" "php$PHP_VERSION-xml" "php$PHP_VERSION-mbstring"
     "php$PHP_VERSION-curl" "php$PHP_VERSION-zip" "php$PHP_VERSION-bcmath"
     "php$PHP_VERSION-intl" "php$PHP_VERSION-opcache"
+    "php$PHP_VERSION-simplexml" "php$PHP_VERSION-dom" "php$PHP_VERSION-fileinfo"
 )
 for pkg in "${PHP_PACKAGES[@]}"; do
     if ! package_installed "$pkg"; then
@@ -89,7 +105,7 @@ done
 
 sudo systemctl enable "php$PHP_VERSION-fpm"
 sudo systemctl start "php$PHP_VERSION-fpm"
-php -v
+echo "Версия PHP: $(php -v | head -n1)"
 
 # --- 6. Composer (если нет) ---
 echo "📦 Устанавливаем Composer..."
@@ -108,9 +124,29 @@ if ! command -v node &> /dev/null || ! command -v npm &> /dev/null; then
 else
     echo "Node.js и npm уже установлены ✅"
 fi
+
+# --- 8. Финальная проверка ---
+echo "🔍 Проверяем конфигурацию..."
+
+# Проверка сервисов
+SERVICES=("nginx" "mariadb" "php$PHP_VERSION-fpm")
+for service in "${SERVICES[@]}"; do
+    if sudo systemctl is-active --quiet "$service"; then
+        echo "✅ $service работает"
+    else
+        echo "❌ $service не запущен"
+    fi
+done
+
+# Проверка конфигурации Nginx
+if sudo nginx -t; then
+    sudo systemctl reload nginx
+    echo "✅ Конфигурация Nginx корректна"
+else
+    echo "❌ Ошибка конфигурации Nginx"
+    exit 1
+fi
 node -v
 npm -v
 
 echo "✅ Развёртывание завершено!"
-echo "Проверьте работу: откройте в браузере http://ваш-сервер/info.php"
-echo "Для безопасности удалите info.php после проверки: sudo rm /var/www/html/info.php"
