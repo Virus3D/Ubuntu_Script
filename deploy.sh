@@ -506,6 +506,249 @@ rebuild_project() {
     mode="rebuild"
 }
 
+setup_git_workflow() {
+    local project_type="$1"
+    local environment="$2"
+    local project_dir="$3"
+    
+    step "Настройка Git workflow для окружения $environment..."
+    
+    # Создание .gitignore в зависимости от типа проекта
+    case "$project_type" in
+        laravel|symfony|php)
+            safe_execute "cat > '$project_dir/.gitignore' << 'EOF'
+# Environment
+.env
+.env.prod
+.env.dev
+.env.local
+
+# Logs
+storage/logs/*.log
+*.log
+
+# Cache
+storage/framework/cache/
+storage/framework/views/
+bootstrap/cache/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Deployment
+deploy.sh
+*.backup
+*.sql
+EOF" "Создание .gitignore для $project_type" 0
+            ;;
+
+        bitrix)
+            safe_execute "cat > '$project_dir/.gitignore' << 'EOF'
+# Bitrix24 Git ignore
+
+# Environment settings
+/.settings.php
+/dbconn.php
+/bitrix/php_interface/dbconn.php
+/bitrix/.settings.php
+
+# Cache directories
+/bitrix/cache/*
+/bitrix/managed_cache/*
+/bitrix/stack_cache/*
+/bitrix/html_pages/*
+
+# Temporary files
+/bitrix/tmp/*
+/bitrix/backup/*
+
+# Upload directory (осторожно - может содержать пользовательский контент)
+/upload/*
+
+# Logs
+/bitrix/modules/*/log/
+
+# Personal configurations
+/bitrix/php_interface/after_connect_d7.php
+/bitrix/php_interface/after_connect.php
+/bitrix/php_interface/init.php
+/bitrix/php_interface/dbconn.php
+
+# Backup files
+*.backup
+*.sql
+*.tar
+*.gz
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Deployment scripts
+deploy.sh
+EOF" "Создание .gitignore для Bitrix24" 0
+            
+            if [ $? -eq 0 ]; then
+                bitrix_info "Создан .gitignore для Bitrix24"
+            fi
+            
+            # Создание README с инструкциями по Git workflow
+            safe_execute "cat > '$project_dir/README.git.md' << 'EOF'
+# Git Workflow для Bitrix24
+
+## Структура веток
+- `main`/prod - боевая версия
+- `stage` - тестовый сервер  
+- `dev` - разработка
+
+## Что коммитить в Git:
+- ✅ Изменения в /local/
+- ✅ Новые модули в /bitrix/modules/
+- ✅ Шаблоны в /bitrix/templates/
+- ✅ Компоненты в /bitrix/components/
+
+## Что НЕ коммитить:
+- ❌ Файлы кеша
+- ❌ Загруженные файлы из /upload/
+- ❌ Настройки БД (.settings.php)
+- ❌ Временные файлы
+
+## Процесс разработки:
+1. Разработка в ветке `dev`
+2. Тестирование в `stage` 
+3. Деплой на продакшен из `main`
+EOF" "Создание README с инструкциями по Git workflow" 0
+            ;;
+
+        nodejs)
+            safe_execute "cat > '$project_dir/.gitignore' << 'EOF'
+# Dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment
+.env
+.env.local
+
+# Logs
+logs
+*.log
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage directory used by tools like istanbul
+coverage/
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Deployment
+deploy.sh
+dist/
+build/
+EOF" "Создание .gitignore для Node.js" 0
+            ;;
+    esac
+
+    if [ $? -eq 0 ]; then
+        info "Создан .gitignore для $project_type"
+    fi
+
+    # Создание скрипта для настройки окружения
+    local setup_env_script="$project_dir/setup-environment.sh"
+    safe_execute "cat > '$setup_env_script' << EOF
+#!/bin/bash
+# Скрипт настройки окружения для $project_name
+
+ENV=\${1:-$environment}
+
+echo "Настройка окружения: \$ENV"
+
+case "\$ENV" in
+    dev)
+        # Настройки для разработки
+        echo "DEV environment configuration"
+        
+        # Для PHP проектов
+        if [[ "$project_type" == "php" || "$project_type" == "laravel" || "$project_type" == "symfony" || "$project_type" == "bitrix" ]]; then
+            # Включаем вывод ошибок для разработки
+            sed -i "s/display_errors = Off/display_errors = On/" /etc/php/$php_version/fpm/php.ini 2>/dev/null || true
+            sed -i "s/error_reporting = .*/error_reporting = E_ALL/" /etc/php/$php_version/fpm/php.ini 2>/dev/null || true
+            
+            # Перезагрузка PHP-FPM
+            systemctl reload php$php_version-fpm
+        fi
+        
+        # Для Bitrix
+        if [ "$project_type" = "bitrix" ]; then
+            # Включаем режим отладки
+            if [ -f "$project_dir/bitrix/.settings.php" ]; then
+                sed -i "s/'debug' => false/'debug' => true/" "$project_dir/bitrix/.settings.php" 2>/dev/null || true
+            fi
+        fi
+        ;;
+        
+    prod)
+        # Настройки для продакшена
+        echo "PROD environment configuration"
+        
+        # Для PHP проектов
+        if [[ "$project_type" == "php" || "$project_type" == "laravel" || "$project_type" == "symfony" || "$project_type" == "bitrix" ]]; then
+            # Выключаем вывод ошибок
+            sed -i "s/display_errors = On/display_errors = Off/" /etc/php/$php_version/fpm/php.ini 2>/dev/null || true
+            sed -i "s/error_reporting = .*/error_reporting = E_ALL \& ~E_DEPRECATED \& ~E_STRICT/" /etc/php/$php_version/fpm/php.ini 2>/dev/null || true
+            
+            # Перезагрузка PHP-FPM
+            systemctl reload php$php_version-fpm
+        fi
+        
+        # Для Bitrix
+        if [ "$project_type" = "bitrix" ]; then
+            # Выключаем режим отладки
+            if [ -f "$project_dir/bitrix/.settings.php" ]; then
+                sed -i "s/'debug' => true/'debug' => false/" "$project_dir/bitrix/.settings.php" 2>/dev/null || true
+            fi
+        fi
+        ;;
+esac
+
+echo "Окружение \$ENV настроено"
+EOF" "Создание скрипта для настройки окружения" 0
+
+    safe_chmod "$deploy_script" "+x"
+    info "Создан скрипт настройки окружения: $setup_env_script"
+}
+
 # Проверка прав root
 if [ "$EUID" -ne 0 ]; then
     critical_error "Запустите скрипт с правами root"
@@ -559,6 +802,15 @@ if [ "$mode" = "install" ]; then
                 critical_error "Установка прервана"
             fi
         fi
+        
+        # Проверка существования директории
+        if [ -d "/var/www/$project_name" ]; then
+            warn "Директория /var/www/$project_name уже существует"
+            read -p "Продолжить? (существующие данные могут быть перезаписаны) (y/n): " overwrite
+            [ "$overwrite" = "y" ] && break
+        else
+            break
+        fi
     done
 
     while true; do
@@ -605,8 +857,9 @@ if [ "$mode" = "install" ]; then
     info "Выбрано окружение: $environment"
 fi
 
+is_php = [ "$project_type" == "php" || "$project_type" == "laravel" || "$project_type" == "symfony" || "$project_type" == "bitrix" ]
 # Выбор версии PHP для PHP проектов
-if [ "$mode" = "install" ] && [[ "$project_type" == "php" || "$project_type" == "laravel" || "$project_type" == "symfony" || "$project_type" == "bitrix" ]]; then
+if [ "$mode" = "install" ] && [is_php]; then
     php_version=""
     BITRIX_PHP_OPTIMIZED=0
     available_versions=($(detect_php_versions))
@@ -715,7 +968,7 @@ if [ "$mode" = "install" ]; then
     fi
 
     # Настройка PHP-FPM
-    if [[ "$project_type" == "php" || "$project_type" == "laravel" || "$project_type" == "symfony" || "$project_type" == "bitrix" ]]; then
+    if [is_php]; then
         read -p "Имя PHP-FPM пула (по умолчанию: $project_name): " fpm_pool_name
         fpm_pool_name=${fpm_pool_name:-$project_name}
         
@@ -738,12 +991,12 @@ echo "  Имя: $project_name"
 echo "  Домен: $domain"
 echo "  Тип: $project_type"
 echo "  Окружение: $environment"
-[[ "$project_type" == "php" || "$project_type" == "laravel" || "$project_type" == "symfony" || "$project_type" == "bitrix" ]] && echo "  Версия PHP: $php_version"
+[is_php] && echo "  Версия PHP: $php_version"
 echo "  Директория: /var/www/$project_name"
 [ "$use_git" = "y" ] && echo "  GitHub: $repo_url ($git_branch)"
 [ "$project_type" = "bitrix" ] && echo "  Способ установки Bitrix: $bitrix_install_method"
 [ "$create_db" = "y" ] && echo "  Будет создана БД MySQL"
-[[ "$project_type" == "php" || "$project_type" == "laravel" || "$project_type" == "symfony" || "$project_type" == "bitrix" ]] && echo "  PHP-FPM пул: $fpm_pool_name"
+[is_php] && echo "  PHP-FPM пул: $fpm_pool_name"
 [ "$mode" = "rebuild" ] && echo "  РЕЖИМ: ПЕРЕСБОРКА СУЩЕСТВУЮЩЕГО ПРОЕКТА"
 
 read -p "Продолжить установку? (y/n): " confirm
@@ -823,156 +1076,12 @@ if [ "$mode" = "install" ] && [ "$use_git" = "y" ] && [ "$project_type" != "bitr
 fi
 
 # Настройка Git workflow (только для новой установки)
-if [ "$mode" = "install" ] && ([ $ERROR_OCCURRED -eq 0 ] || [ $SKIP_STEP -eq 0 ]); then
-    step "Настройка Git workflow..."
-    
-    # Создание .gitignore в зависимости от типа проекта
-    case "$project_type" in
-        laravel|symfony|php)
-            safe_execute "cat > '$project_dir/.gitignore' << 'EOF'
-# Environment
-.env
-.env.prod
-.env.dev
-.env.local
-
-# Logs
-storage/logs/*.log
-*.log
-
-# Cache
-storage/framework/cache/
-storage/framework/views/
-bootstrap/cache/
-
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Node
-node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# Deployment
-deploy.sh
-*.backup
-*.sql
-EOF" "Создание .gitignore для $project_type" 0
-            ;;
-
-        bitrix)
-            safe_execute "cat > '$project_dir/.gitignore' << 'EOF'
-# Bitrix24 Git ignore
-
-# Environment settings
-/.settings.php
-/dbconn.php
-/bitrix/php_interface/dbconn.php
-/bitrix/.settings.php
-
-# Cache directories
-/bitrix/cache/*
-/bitrix/managed_cache/*
-/bitrix/stack_cache/*
-/bitrix/html_pages/*
-
-# Temporary files
-/bitrix/tmp/*
-/bitrix/backup/*
-
-# Upload directory (осторожно - может содержать пользовательский контент)
-/upload/*
-
-# Logs
-/bitrix/modules/*/log/
-
-# Personal configurations
-/bitrix/php_interface/after_connect_d7.php
-/bitrix/php_interface/after_connect.php
-/bitrix/php_interface/init.php
-/bitrix/php_interface/dbconn.php
-
-# Backup files
-*.backup
-*.sql
-*.tar
-*.gz
-
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Deployment scripts
-deploy.sh
-EOF" "Создание .gitignore для Bitrix24" 0
-            
-            if [ $? -eq 0 ]; then
-                bitrix_info "Создан .gitignore для Bitrix24"
-            fi
-            ;;
-
-        nodejs)
-            safe_execute "cat > '$project_dir/.gitignore' << 'EOF'
-# Dependencies
-node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# Environment
-.env
-.env.local
-
-# Logs
-logs
-*.log
-
-# Runtime data
-pids
-*.pid
-*.seed
-*.pid.lock
-
-# Coverage directory used by tools like istanbul
-coverage/
-
-# IDE
-.idea/
-.vscode/
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Deployment
-deploy.sh
-dist/
-build/
-EOF" "Создание .gitignore для Node.js" 0
-            ;;
-    esac
-
-    if [ $? -eq 0 ]; then
-        info "Создан .gitignore для $project_type"
-    fi
+if [ "$mode" = "install" ]; then
+    setup_git_workflow "$project_type" "$environment" "$project_dir"
 fi
 
 # Создание PHP-FPM пула
-if [[ "$project_type" == "php" || "$project_type" == "laravel" || "$project_type" == "symfony" || "$project_type" == "bitrix" ]]; then
+if [is_php]; then
     step "Настройка PHP-FPM пула..."
     
     fpm_pool_conf="/etc/php/$php_version/fpm/pool.d/$fpm_pool_name.conf"
@@ -1052,7 +1161,7 @@ if [[ "$project_type" == "php" || "$project_type" == "laravel" || "$project_type
     esac
     
     # Оптимизация для Bitrix
-    if [ "$project_type" = "bitrix" ]; then
+    if [ "$project_type" = "bitrix" ] && [ "$BITRIX_PHP_OPTIMIZED" -eq 1 ]; then
         upload_max_filesize="128M"
         post_max_size="128M"
     else
@@ -1116,30 +1225,13 @@ nginx_conf="/etc/nginx/sites-available/$project_name"
 
 # Общие настройки в зависимости от окружения
 if [ "$environment" = "dev" ]; then
-    # Для разработки - более детальное логирование с кастомным форматом
-    access_log="access_log /var/log/nginx/${project_name}_access.log custom_dev buffer=64k flush=1m;"
+    # Для разработки - более детальное логирование
+    access_log="access_log /var/log/nginx/${project_name}_access.log main buffer=64k flush=1m;"
     error_log="error_log /var/log/nginx/${project_name}_error.log debug;"
 else
-    # Для продакшена - стандартный комбинированный формат
-    access_log="access_log /var/log/nginx/${project_name}_access.log combined buffer=256k flush=5m;"
+    # Для продакшена - оптимизированное логирование
+    access_log="access_log /var/log/nginx/${project_name}_access.log main buffer=256k flush=5m;"
     error_log="error_log /var/log/nginx/${project_name}_error.log warn;"
-fi
-
-# Добавим создание кастомного формата логов в конфигурацию Nginx
-nginx_custom_logs="/etc/nginx/conf.d/custom_logs.conf"
-if [ ! -f "$nginx_custom_logs" ]; then
-    cat > "$nginx_custom_logs" << 'EOF'
-# Кастомные форматы логов для dev окружения
-log_format custom_dev '$remote_addr - $remote_user [$time_local] '
-                      '"$request" $status $body_bytes_sent '
-                      '"$http_referer" "$http_user_agent" '
-                      'rt=$request_time uct="$upstream_connect_time" uht="$upstream_header_time" urt="$upstream_response_time"';
-
-log_format custom_bitrix '$remote_addr - $remote_user [$time_local] '
-                         '"$request" $status $body_bytes_sent '
-                         '"$http_referer" "$http_user_agent" "$http_x_forwarded_for" '
-                         'rt=$request_time uct="$upstream_connect_time" uht="$upstream_header_time" urt="$upstream_response_time"';
-EOF
 fi
 
 case $project_type in
@@ -1259,12 +1351,6 @@ EOF" "Создание Nginx конфигурации для Symfony" 1
         ;;
 
     bitrix)
-        if [ "$environment" = "dev" ]; then
-            bitrix_access_log="access_log /var/log/nginx/${project_name}_access.log custom_bitrix buffer=64k flush=1m;"
-        else
-            bitrix_access_log="access_log /var/log/nginx/${project_name}_access.log combined buffer=256k flush=5m;"
-        fi
-
         safe_execute "cat > '$nginx_conf' << EOF
 server {
     listen 80;
@@ -1272,7 +1358,7 @@ server {
     root $project_dir;
     index index.php index.html;
 
-    $bitrix_access_log
+    $access_log
     $error_log
 
     # Основные настройки для Bitrix
@@ -1410,11 +1496,42 @@ if [ "$mode" = "install" ] && [ "$create_db" = "y" ] && ([ $ERROR_OCCURRED -eq 0
 Пароль: $db_pass
 Хост: localhost
 EOF" "Создание файла с данными БД" 0
-        
+
         if [ $? -eq 0 ]; then
             safe_chmod "$project_dir/database_credentials.txt" "600"
             safe_chown "$project_dir/database_credentials.txt"
             warn "Данные БД сохранены в $project_dir/database_credentials.txt"
+        fi
+    fi
+    
+    # Для Bitrix создаем дополнительный файл с настройками
+    if [ "$project_type" = "bitrix" ]; then
+        bitrix_db_file="$project_dir/bitrix/.settings.php"
+        if [ ! -f "$bitrix_db_file" ]; then
+            mkdir -p "$project_dir/bitrix"
+            safe_execute "cat > '$bitrix_db_file' << 'EOF'
+<?php
+return array(
+  'connections' => array(
+    'value' => array(
+      'default' => array(
+        'className' => '\\Bitrix\\Main\\DB\\MysqliConnection',
+        'host' => 'localhost',
+        'database' => 'DB_NAME',
+        'login' => 'DB_USER',
+        'password' => 'DB_PASSWORD',
+        'options' => 2,
+      ),
+    ),
+    'readonly' => true,
+  ),
+);
+EOF" "Для Bitrix создаем дополнительный файл с настройками" 0
+            # Заменяем плейсхолдеры на реальные значения
+            sed -i "s/DB_NAME/$db_name/g" "$bitrix_db_file"
+            sed -i "s/DB_USER/$db_user/g" "$bitrix_db_file"
+            sed -i "s/DB_PASSWORD/$db_pass/g" "$bitrix_db_file"
+            safe_chown "$bitrix_db_file"
         fi
     fi
 fi
@@ -1488,7 +1605,6 @@ MIX_PUSHER_APP_KEY=\"\\\${PUSHER_APP_KEY}\"
 MIX_PUSHER_APP_CLUSTER=\"\\\${PUSHER_APP_CLUSTER}\"
 EOF" "Создание .env файла" 0
                 fi
-                
                 if [ $? -eq 0 ]; then
                     safe_chown "$project_dir/.env"
                     # Генерируем ключ приложения
@@ -1501,6 +1617,50 @@ EOF" "Создание .env файла" 0
         fi
         ;;
 
+    symfony)
+        step "Настройка Symfony..."
+        
+        # Проверка существования composer.json
+        if [ -f "$project_dir/composer.json" ]; then
+            # Установка прав для var и config
+            safe_chown "$project_dir/var"
+            safe_chown "$project_dir/config"
+            safe_chmod "$project_dir/var" "775"
+            safe_chmod "$project_dir/config" "775"
+            
+            # Копирование .env файла если его нет (только для новой установки)
+            if [ "$mode" = "install" ] && [ ! -f "$project_dir/.env" ] && { [ -f "$project_dir/.env.example" ] || [ -f "$project_dir/.env.dist" ]; }; then
+                if [ -f "$project_dir/.env.example" ]; then
+                    cp $project_dir/.env.example $project_dir/.env
+                elif [ -f "$project_dir/.env.dist" ]; then
+                    cp $project_dir/.env.dist $project_dir/.env
+                fi
+                safe_chown "$project_dir/.env"
+                
+                # Обновление .env с данными БД если создавали БД
+                if [ "$create_db" = "y" ]; then
+                    # Symfony использует DATABASE_URL
+                    database_url="mysql://$db_user:$db_pass@localhost:3306/$db_name?serverVersion=8.0&charset=utf8mb4"
+                    escaped_url=$(printf '%s\n' "$database_url" | sed -e 's/[\/&]/\\&/g')
+                    sed -i "s|DATABASE_URL=.*|DATABASE_URL=\"$escaped_url\"|" $project_dir/.env
+                fi
+                
+                # Устанавливаем окружение
+                sed -i "s|APP_ENV=.*|APP_ENV=$environment|" $project_dir/.env
+                sed -i "s|APP_DEBUG=.*|APP_DEBUG=$([ "$environment" = "dev" ] && echo "1" || echo "0")|" $project_dir/.env
+                
+                warn "Создан .env файл. Проверьте настройки."
+            fi
+            
+            # Создание автоматического .env.local.php для оптимизации
+            if [ -f "$project_dir/.env" ]; then
+                sudo -u www-data /usr/bin/php$php_version $project_dir/bin/console --env=prod >/dev/null 2>&1 || true
+            fi
+        else
+            warn "composer.json не найден. Symfony может требовать дополнительной настройки."
+        fi
+        ;;
+
     bitrix)
         step "Дополнительная настройка Bitrix24..."
         
@@ -1509,9 +1669,10 @@ EOF" "Создание .env файла" 0
             warn "Файл urlrewrite.php не найден. Bitrix24 может требовать дополнительной настройки."
         fi
         
-        # Создаем php.ini для Bitrix
-        bitrix_php_ini="/etc/php/$php_version/fpm/conf.d/99-bitrix-$project_name.ini"
-        safe_execute "cat > '$bitrix_php_ini' << EOF
+        # Создаем php.ini для Bitrix если нужно
+        if [ "$BITRIX_PHP_OPTIMIZED" -eq 1 ]; then
+            bitrix_php_ini="/etc/php/$php_version/fpm/conf.d/99-bitrix-$project_name.ini"
+	    safe_execute "cat > '$bitrix_php_ini' << EOF
 ; Настройки PHP для Bitrix24 - $project_name
 memory_limit = 512M
 upload_max_filesize = 128M
@@ -1556,6 +1717,31 @@ EOF" "Создание cron заданий для Bitrix" 0
         if [ $? -eq 0 ]; then
             safe_chmod "$bitrix_cron" "644"
             bitrix_info "Добавлены cron задания для Bitrix24"
+        fi
+        
+        # Создаем конфигурационный файл для разных окружений
+        bitrix_env_config="$project_dir/bitrix/configuration.php"
+        if [ ! -f "$bitrix_env_config" ]; then
+            safe_execute "cat > '$bitrix_env_config' << EOF
+<?php
+// Конфигурация окружения Bitrix24
+define('BX_DEBUG', $([ "$environment" = "dev" ] && echo "true" || echo "false"));
+define('BX_COMPRESSION_DISABLED', $([ "$environment" = "dev" ] && echo "true" || echo "false"));
+
+// Настройки кеширования в зависимости от окружения
+if (BX_DEBUG) {
+    // Для разработки - кеш на короткое время
+    define('BX_CACHE_SID', 'dev');
+    define('BX_CACHE_TYPE', 'files');
+    define('BX_CACHE_TIME', 60);
+} else {
+    // Для продакшена - длительное кеширование
+    define('BX_CACHE_SID', 'prod');
+    define('BX_CACHE_TYPE', 'files');
+    define('BX_CACHE_TIME', 3600);
+}
+EOF" "Создаем конфигурационный файл для разных окружений Bitrix" 0
+            safe_chown "$bitrix_env_config"
         fi
         ;;
 esac
@@ -1693,8 +1879,8 @@ echo "  Домен: http://$domain"
 echo "  Окружение: $environment"
 echo "  Директория: $project_dir"
 [ "$create_db" = "y" ] && [ -n "$db_name" ] && echo "  База данных: $db_name"
-[[ "$project_type" == "php" || "$project_type" == "laravel" || "$project_type" == "symfony" || "$project_type" == "bitrix" ]] && echo "  Версия PHP: $php_version"
-[[ "$project_type" == "php" || "$project_type" == "laravel" || "$project_type" == "symfony" || "$project_type" == "bitrix" ]] && echo "  PHP-FPM пул: $fpm_pool_name"
+[is_php] && echo "  Версия PHP: $php_version"
+[is_php] && echo "  PHP-FPM пул: $fpm_pool_name"
 echo ""
 [ "$mode" = "rebuild" ] && rebuild_info "ПРОЕКТ ПЕРЕСОБРАН!" && echo ""
 
@@ -1715,9 +1901,18 @@ case "$project_type" in
         fi
         echo "  - Для деплоя: $deploy_script $environment"
         ;;
+    symfony)
+        echo "  - Выполните: cd $project_dir && php bin/console secrets:generate-keys"
+        echo "  - Настройте .env файл если необходимо"
+        echo "  - Для деплоя: $deploy_script $environment"
+        ;;
     bitrix)
         echo "  - Откройте http://$domain в браузере для завершения установки Bitrix24"
         echo "  - Настройте административную панель Bitrix"
+        echo "  - Для деплоя: $deploy_script $environment"
+        ;;
+    nodejs)
+        echo "  - Запустите Node.js приложение на порту 3000"
         echo "  - Для деплоя: $deploy_script $environment"
         ;;
 esac
