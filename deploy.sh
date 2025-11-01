@@ -513,10 +513,17 @@ setup_git_workflow() {
     
     step "Настройка Git workflow для окружения $environment..."
     
+    # Проверяем, существует ли уже .gitignore
+    local gitignore_file="$project_dir/.gitignore"
+    if [ -f "$gitignore_file" ]; then
+        info "Файл .gitignore уже существует, пропускаем создание"
+        return 0
+    fi
+    
     # Создание .gitignore в зависимости от типа проекта
     case "$project_type" in
         laravel|symfony|php)
-            safe_execute "cat > '$project_dir/.gitignore' << 'EOF'
+            safe_execute "cat > '$gitignore_file' << 'EOF'
 # Environment
 .env
 .env.prod
@@ -556,7 +563,7 @@ EOF" "Создание .gitignore для $project_type" 0
             ;;
 
         bitrix)
-            safe_execute "cat > '$project_dir/.gitignore' << 'EOF'
+            safe_execute "cat > '$gitignore_file' << 'EOF'
 # Bitrix24 Git ignore
 
 # Environment settings
@@ -609,16 +616,17 @@ EOF" "Создание .gitignore для Bitrix24" 0
             
             if [ $? -eq 0 ]; then
                 bitrix_info "Создан .gitignore для Bitrix24"
-            fi
-            
-            # Создание README с инструкциями по Git workflow
-            safe_execute "cat > '$project_dir/README.git.md' << 'EOF'
+                
+                # Создание README с инструкциями по Git workflow (только если не существует)
+                local readme_file="$project_dir/README.git.md"
+                if [ ! -f "$readme_file" ]; then
+                    safe_execute "cat > '$readme_file' << 'EOF'
 # Git Workflow для Bitrix24
 
 ## Структура веток
-- `main`/prod - боевая версия
-- `stage` - тестовый сервер  
-- `dev` - разработка
+- \`main\`/prod - боевая версия
+- \`stage\` - тестовый сервер  
+- \`dev\` - разработка
 
 ## Что коммитить в Git:
 - ✅ Изменения в /local/
@@ -633,14 +641,18 @@ EOF" "Создание .gitignore для Bitrix24" 0
 - ❌ Временные файлы
 
 ## Процесс разработки:
-1. Разработка в ветке `dev`
-2. Тестирование в `stage` 
-3. Деплой на продакшен из `main`
-EOF" "Создание README с инструкциями по Git workflow" 0
+1. Разработка в ветке \`dev\`
+2. Тестирование в \`stage\` 
+3. Деплой на продакшен из \`main\`
+EOF" "Создание README.git.md" 0
+                else
+                    info "README.git.md уже существует, пропускаем создание"
+                fi
+            fi
             ;;
 
         nodejs)
-            safe_execute "cat > '$project_dir/.gitignore' << 'EOF'
+            safe_execute "cat > '$gitignore_file' << 'EOF'
 # Dependencies
 node_modules/
 npm-debug.log*
@@ -680,73 +692,75 @@ EOF" "Создание .gitignore для Node.js" 0
             ;;
     esac
 
-    if [ $? -eq 0 ]; then
+    if [ $? -eq 0 ] && [ -f "$gitignore_file" ]; then
         info "Создан .gitignore для $project_type"
     fi
 
-    # Создание скрипта для настройки окружения
+    # Создание скрипта для настройки окружения (всегда обновляем)
     local setup_env_script="$project_dir/setup-environment.sh"
     safe_execute "cat > '$setup_env_script' << EOF
 #!/bin/bash
 # Скрипт настройки окружения для $project_name
 
-ENV=\${1:-$environment}
+ENV=\\\${1:-$environment}
 
-echo "Настройка окружения: \$ENV"
+echo \"Настройка окружения: \\\$ENV\"
 
-case "\$ENV" in
+case \"\\\$ENV\" in
     dev)
         # Настройки для разработки
-        echo "DEV environment configuration"
+        echo \"DEV environment configuration\"
         
         # Для PHP проектов
-        if [[ "$project_type" == "php" || "$project_type" == "laravel" || "$project_type" == "symfony" || "$project_type" == "bitrix" ]]; then
+        if [[ \"$project_type\" == \"php\" || \"$project_type\" == \"laravel\" || \"$project_type\" == \"symfony\" || \"$project_type\" == \"bitrix\" ]]; then
             # Включаем вывод ошибок для разработки
-            sed -i "s/display_errors = Off/display_errors = On/" /etc/php/$php_version/fpm/php.ini 2>/dev/null || true
-            sed -i "s/error_reporting = .*/error_reporting = E_ALL/" /etc/php/$php_version/fpm/php.ini 2>/dev/null || true
+            sed -i \"s/display_errors = Off/display_errors = On/\" /etc/php/$php_version/fpm/php.ini 2>/dev/null || true
+            sed -i \"s/error_reporting = .*/error_reporting = E_ALL/\" /etc/php/$php_version/fpm/php.ini 2>/dev/null || true
             
             # Перезагрузка PHP-FPM
             systemctl reload php$php_version-fpm
         fi
         
         # Для Bitrix
-        if [ "$project_type" = "bitrix" ]; then
+        if [ \"$project_type\" = \"bitrix\" ]; then
             # Включаем режим отладки
-            if [ -f "$project_dir/bitrix/.settings.php" ]; then
-                sed -i "s/'debug' => false/'debug' => true/" "$project_dir/bitrix/.settings.php" 2>/dev/null || true
+            if [ -f \"$project_dir/bitrix/.settings.php\" ]; then
+                sed -i \"s/'debug' => false/'debug' => true/\" \"$project_dir/bitrix/.settings.php\" 2>/dev/null || true
             fi
         fi
         ;;
         
     prod)
         # Настройки для продакшена
-        echo "PROD environment configuration"
+        echo \"PROD environment configuration\"
         
         # Для PHP проектов
-        if [[ "$project_type" == "php" || "$project_type" == "laravel" || "$project_type" == "symfony" || "$project_type" == "bitrix" ]]; then
+        if [[ \"$project_type\" == \"php\" || \"$project_type\" == \"laravel\" || \"$project_type\" == \"symfony\" || \"$project_type\" == \"bitrix\" ]]; then
             # Выключаем вывод ошибок
-            sed -i "s/display_errors = On/display_errors = Off/" /etc/php/$php_version/fpm/php.ini 2>/dev/null || true
-            sed -i "s/error_reporting = .*/error_reporting = E_ALL \& ~E_DEPRECATED \& ~E_STRICT/" /etc/php/$php_version/fpm/php.ini 2>/dev/null || true
+            sed -i \"s/display_errors = On/display_errors = Off/\" /etc/php/$php_version/fpm/php.ini 2>/dev/null || true
+            sed -i \"s/error_reporting = .*/error_reporting = E_ALL \\\& ~E_DEPRECATED \\\& ~E_STRICT/\" /etc/php/$php_version/fpm/php.ini 2>/dev/null || true
             
             # Перезагрузка PHP-FPM
             systemctl reload php$php_version-fpm
         fi
         
         # Для Bitrix
-        if [ "$project_type" = "bitrix" ]; then
+        if [ \"$project_type\" = \"bitrix\" ]; then
             # Выключаем режим отладки
-            if [ -f "$project_dir/bitrix/.settings.php" ]; then
-                sed -i "s/'debug' => true/'debug' => false/" "$project_dir/bitrix/.settings.php" 2>/dev/null || true
+            if [ -f \"$project_dir/bitrix/.settings.php\" ]; then
+                sed -i \"s/'debug' => true/'debug' => false/\" \"$project_dir/bitrix/.settings.php\" 2>/dev/null || true
             fi
         fi
         ;;
 esac
 
-echo "Окружение \$ENV настроено"
-EOF" "Создание скрипта для настройки окружения" 0
+echo \"Окружение \\\$ENV настроено\"
+EOF" "Создание скрипта настройки окружения" 0
 
-    safe_chmod "$deploy_script" "+x"
-    info "Создан скрипт настройки окружения: $setup_env_script"
+    if [ $? -eq 0 ]; then
+        safe_chmod "$setup_env_script" "+x"
+        info "Создан скрипт настройки окружения: $setup_env_script"
+    fi
 }
 
 # Проверка прав root
@@ -1225,13 +1239,29 @@ nginx_conf="/etc/nginx/sites-available/$project_name"
 
 # Общие настройки в зависимости от окружения
 if [ "$environment" = "dev" ]; then
-    # Для разработки - более детальное логирование
-    access_log="access_log /var/log/nginx/${project_name}_access.log main buffer=64k flush=1m;"
+    # Для разработки - более детальное логирование с кастомным форматом
+    access_log="access_log /var/log/nginx/${project_name}_access.log custom_dev buffer=64k flush=1m;"
     error_log="error_log /var/log/nginx/${project_name}_error.log debug;"
 else
-    # Для продакшена - оптимизированное логирование
-    access_log="access_log /var/log/nginx/${project_name}_access.log main buffer=256k flush=5m;"
+    # Для продакшена - стандартный комбинированный формат
+    access_log="access_log /var/log/nginx/${project_name}_access.log combined buffer=256k flush=5m;"
     error_log="error_log /var/log/nginx/${project_name}_error.log warn;"
+fi
+
+nginx_custom_logs="/etc/nginx/conf.d/custom_logs.conf"
+if [ ! -f "$nginx_custom_logs" ]; then
+    cat > "$nginx_custom_logs" << 'EOF'
+# Кастомные форматы логов для dev окружения
+log_format custom_dev '$remote_addr - $remote_user [$time_local] '
+                      '"$request" $status $body_bytes_sent '
+                      '"$http_referer" "$http_user_agent" '
+                      'rt=$request_time uct="$upstream_connect_time" uht="$upstream_header_time" urt="$upstream_response_time"';
+
+log_format custom_bitrix '$remote_addr - $remote_user [$time_local] '
+                         '"$request" $status $body_bytes_sent '
+                         '"$http_referer" "$http_user_agent" "$http_x_forwarded_for" '
+                         'rt=$request_time uct="$upstream_connect_time" uht="$upstream_header_time" urt="$upstream_response_time"';
+EOF
 fi
 
 case $project_type in
@@ -1351,6 +1381,12 @@ EOF" "Создание Nginx конфигурации для Symfony" 1
         ;;
 
     bitrix)
+        if [ "$environment" = "dev" ]; then
+            bitrix_access_log="access_log /var/log/nginx/${project_name}_access.log custom_bitrix buffer=64k flush=1m;"
+        else
+            bitrix_access_log="access_log /var/log/nginx/${project_name}_access.log combined buffer=256k flush=5m;"
+        fi
+
         safe_execute "cat > '$nginx_conf' << EOF
 server {
     listen 80;
@@ -1358,7 +1394,7 @@ server {
     root $project_dir;
     index index.php index.html;
 
-    $access_log
+    $bitrix_access_log
     $error_log
 
     # Основные настройки для Bitrix
