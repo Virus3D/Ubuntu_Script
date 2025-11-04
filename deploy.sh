@@ -763,6 +763,52 @@ EOF" "Создание скрипта настройки окружения" 0
     fi
 }
 
+create_backup() {
+    local backup_dir="/var/backups/$project_name"
+    local timestamp=$(date +%Y%m%d_%H%M%S)
+    
+    safe_mkdir "$backup_dir"
+    
+    # Бэкап конфигов
+    tar -czf "$backup_dir/config_$timestamp.tar.gz" \
+        "/etc/nginx/sites-available/$project_name" \
+        "/etc/nginx/sites-enabled/$project_name" \
+        "/etc/php/$php_version/fpm/pool.d/$fpm_pool_name.conf" \
+        2>/dev/null || true
+}
+
+validate_dependencies() {
+    local missing_deps=()
+    
+    case "$project_type" in
+        laravel|symfony)
+            if ! command -v composer &> /dev/null; then
+                missing_deps+=("composer")
+            fi
+            ;;
+        nodejs)
+            if ! command -v node &> /dev/null; then
+                missing_deps+=("nodejs")
+            fi
+            ;;
+    esac
+    
+    if [ ${#missing_deps[@]} -gt 0 ]; then
+        error "Отсутствуют зависимости: ${missing_deps[*]}"
+        return 1
+    fi
+    return 0
+}
+
+setup_ssl() {
+    if command -v certbot &> /dev/null; then
+        read -p "Настроить SSL с Certbot? (y/n): " setup_ssl
+        if [ "$setup_ssl" = "y" ]; then
+            safe_execute "certbot --nginx -d $domain" "Настройка SSL сертификата" 0
+        fi
+    fi
+}
+
 # Проверка прав root
 if [ "$EUID" -ne 0 ]; then
     critical_error "Запустите скрипт с правами root"
@@ -871,9 +917,9 @@ if [ "$mode" = "install" ]; then
     info "Выбрано окружение: $environment"
 fi
 
-is_php = [ "$project_type" == "php" || "$project_type" == "laravel" || "$project_type" == "symfony" || "$project_type" == "bitrix" ]
+is_php() { [[ "$project_type" == "php" || "$project_type" == "laravel" || "$project_type" == "symfony" || "$project_type" == "bitrix" ]]; }
 # Выбор версии PHP для PHP проектов
-if [ "$mode" = "install" ] && [is_php]; then
+if [ "$mode" = "install" ] && is_php; then
     php_version=""
     BITRIX_PHP_OPTIMIZED=0
     available_versions=($(detect_php_versions))
@@ -982,7 +1028,7 @@ if [ "$mode" = "install" ]; then
     fi
 
     # Настройка PHP-FPM
-    if [is_php]; then
+    if is_php; then
         read -p "Имя PHP-FPM пула (по умолчанию: $project_name): " fpm_pool_name
         fpm_pool_name=${fpm_pool_name:-$project_name}
         
@@ -1005,12 +1051,12 @@ echo "  Имя: $project_name"
 echo "  Домен: $domain"
 echo "  Тип: $project_type"
 echo "  Окружение: $environment"
-[is_php] && echo "  Версия PHP: $php_version"
+is_php && echo "  Версия PHP: $php_version"
 echo "  Директория: /var/www/$project_name"
 [ "$use_git" = "y" ] && echo "  GitHub: $repo_url ($git_branch)"
 [ "$project_type" = "bitrix" ] && echo "  Способ установки Bitrix: $bitrix_install_method"
 [ "$create_db" = "y" ] && echo "  Будет создана БД MySQL"
-[is_php] && echo "  PHP-FPM пул: $fpm_pool_name"
+is_php && echo "  PHP-FPM пул: $fpm_pool_name"
 [ "$mode" = "rebuild" ] && echo "  РЕЖИМ: ПЕРЕСБОРКА СУЩЕСТВУЮЩЕГО ПРОЕКТА"
 
 read -p "Продолжить установку? (y/n): " confirm
@@ -1095,7 +1141,7 @@ if [ "$mode" = "install" ]; then
 fi
 
 # Создание PHP-FPM пула
-if [is_php]; then
+if is_php; then
     step "Настройка PHP-FPM пула..."
     
     fpm_pool_conf="/etc/php/$php_version/fpm/pool.d/$fpm_pool_name.conf"
@@ -1708,7 +1754,7 @@ EOF" "Создание .env файла" 0
         # Создаем php.ini для Bitrix если нужно
         if [ "$BITRIX_PHP_OPTIMIZED" -eq 1 ]; then
             bitrix_php_ini="/etc/php/$php_version/fpm/conf.d/99-bitrix-$project_name.ini"
-	    safe_execute "cat > '$bitrix_php_ini' << EOF
+	        safe_execute "cat > '$bitrix_php_ini' << EOF
 ; Настройки PHP для Bitrix24 - $project_name
 memory_limit = 512M
 upload_max_filesize = 128M
@@ -1733,9 +1779,10 @@ disable_functions =
 safe_mode = Off
 EOF" "Создание php.ini для Bitrix" 0
         
-        if [ $? -eq 0 ]; then
-            safe_systemctl "reload" "php$php_version-fpm" "Перезагрузка PHP-FPM после настройки Bitrix"
-            bitrix_info "Создан оптимизированный php.ini для Bitrix24"
+            if [ $? -eq 0 ]; then
+                safe_systemctl "reload" "php$php_version-fpm" "Перезагрузка PHP-FPM после настройки Bitrix"
+                bitrix_info "Создан оптимизированный php.ini для Bitrix24"
+            fi
         fi
         
         # Создаем cron задания для Bitrix
@@ -1915,8 +1962,8 @@ echo "  Домен: http://$domain"
 echo "  Окружение: $environment"
 echo "  Директория: $project_dir"
 [ "$create_db" = "y" ] && [ -n "$db_name" ] && echo "  База данных: $db_name"
-[is_php] && echo "  Версия PHP: $php_version"
-[is_php] && echo "  PHP-FPM пул: $fpm_pool_name"
+is_php && echo "  Версия PHP: $php_version"
+is_php && echo "  PHP-FPM пул: $fpm_pool_name"
 echo ""
 [ "$mode" = "rebuild" ] && rebuild_info "ПРОЕКТ ПЕРЕСОБРАН!" && echo ""
 
