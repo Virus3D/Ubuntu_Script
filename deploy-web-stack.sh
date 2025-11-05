@@ -32,6 +32,10 @@ file_exists() {
     [ -f "$1" ]
 }
 
+user_in_group() {
+    groups "$1" | grep -q "\b$2\b"
+}
+
 # --- 1. Обновление системы ---
 echo "🔁 Обновляем систему..."
 sudo apt update && sudo apt upgrade -y && sudo apt dist-upgrade -y
@@ -48,7 +52,24 @@ for tool in "${BASE_TOOLS[@]}"; do
     fi
 done
 
-# --- 3. Проверка и настройка Git ---
+# --- 3. Добавление пользователя в группу www-data ---
+echo "👥 Настраиваем права доступа..."
+CURRENT_USER=$(whoami)
+
+if ! user_in_group "$CURRENT_USER" "www-data"; then
+    echo "Добавляем пользователя $CURRENT_USER в группу www-data..."
+    sudo usermod -a -G www-data "$CURRENT_USER"
+    echo "✅ Пользователь $CURRENT_USER добавлен в группу www-data"
+    echo "⚠️  Для применения изменений可能需要 перелогиниться или выполнить: newgrp www-data"
+else
+    echo "✅ Пользователь $CURRENT_USER уже в группе www-data"
+fi
+
+# Проверяем текущие группы пользователя
+echo "📋 Текущие группы пользователя $CURRENT_USER:"
+groups "$CURRENT_USER"
+
+# --- 4. Проверка и настройка Git ---
 echo "🔧 Проверяем настройки Git..."
 if command -v git &> /dev/null; then
     CURRENT_GIT_NAME=$(git config --global user.name || echo "Не установлено")
@@ -86,13 +107,14 @@ if command -v git &> /dev/null; then
     git config --global pull.rebase false || true
     git config --global core.editor "vim" || true
     git config --global color.ui auto || true
+    git config --global --add safe.directory "/var/www/*"
     
     echo "✅ Проверка Git завершена"
 else
     echo "❌ Git не установлен!"
 fi
 
-# --- 4. Опциональная генерация SSH ключей для GitHub ---
+# --- 5. Опциональная генерация SSH ключей для GitHub ---
 echo ""
 read -p "🔑 Сгенерировать SSH ключи для GitHub? (y/n): " generate_ssh
 if [[ $generate_ssh == "y" || $generate_ssh == "Y" ]]; then
@@ -149,7 +171,7 @@ else
     echo "ℹ️  Пропускаем генерацию SSH ключей"
 fi
 
-# --- 5. Опциональная установка GitHub CLI ---
+# --- 6. Опциональная установка GitHub CLI ---
 echo ""
 read -p "🔄 Установить GitHub CLI? (y/n): " install_gh
 if [[ $install_gh == "y" || $install_gh == "Y" ]]; then
@@ -176,7 +198,7 @@ else
     echo "ℹ️  Пропускаем установку GitHub CLI"
 fi
 
-# --- 6. Nginx (если нет) ---
+# --- 7. Nginx (если нет) ---
 echo "🌐 Устанавливаем Nginx..."
 if ! package_installed "nginx"; then
     sudo apt install -y nginx
@@ -194,7 +216,7 @@ else
     exit 1
 fi
 
-# --- 7. MariaDB (если нет) ---
+# --- 8. MariaDB (если нет) ---
 echo "🗄 Устанавливаем MariaDB..."
 if ! package_installed "mariadb-server"; then
     sudo apt install -y mariadb-server
@@ -213,7 +235,7 @@ sudo mysql -e "DELETE FROM mysql.db WHERE Db='test' OR Db='test\\_%';"
 sudo mysql -e "FLUSH PRIVILEGES;"
 echo "Базовая безопасность MariaDB настроена ✅"
 
-# --- 8. PHP и модули (с версией из переменной) ---
+# --- 9. PHP и модули (с версией из переменной) ---
 echo "⚙️ Устанавливаем PHP $PHP_VERSION и модули..."
 
 # Добавляем репозиторий PHP если нужно
@@ -242,7 +264,7 @@ sudo systemctl enable "php$PHP_VERSION-fpm"
 sudo systemctl start "php$PHP_VERSION-fpm"
 echo "Версия PHP: $(php -v | head -n1)"
 
-# --- 9. Composer (если нет) ---
+# --- 10. Composer (если нет) ---
 echo "📦 Устанавливаем Composer..."
 if ! command -v composer &> /dev/null; then
     curl -sS https://getcomposer.org/installer | sudo php -- --install-dir=/usr/local/bin --filename=composer
@@ -251,7 +273,7 @@ else
 fi
 composer --version
 
-# --- 10. Node.js и npm (если нет) ---
+# --- 11. Node.js и npm (если нет) ---
 echo "🆕 Устанавливаем Node.js (LTS) и npm..."
 if ! command -v node &> /dev/null || ! command -v npm &> /dev/null; then
     curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
@@ -260,7 +282,7 @@ else
     echo "Node.js и npm уже установлены ✅"
 fi
 
-# --- 11. Установка phpMyAdmin ---
+# --- 12. Установка phpMyAdmin ---
 echo "🗃 Устанавливаем phpMyAdmin $PHPMYADMIN_VERSION..."
 
 # Создаем директорию для phpMyAdmin
@@ -308,7 +330,7 @@ else
     echo "✅ phpMyAdmin уже установлен"
 fi
 
-# --- 12. Настройка Nginx для phpMyAdmin ---
+# --- 13. Настройка Nginx для phpMyAdmin ---
 echo "🔧 Настраиваем Nginx для phpMyAdmin..."
 
 # Создаем конфиг для phpMyAdmin
@@ -360,7 +382,7 @@ else
     echo "✅ Конфиг phpMyAdmin уже активирован в Nginx"
 fi
 
-# --- 13. Создание пользователя MySQL для phpMyAdmin (опционально) ---
+# --- 14. Создание пользователя MySQL для phpMyAdmin (опционально) ---
 echo "🔐 Настраиваем пользователя MySQL для phpMyAdmin..."
 read -p "Создать отдельного пользователя MySQL для phpMyAdmin? (y/n): " create_mysql_user
 
@@ -379,7 +401,20 @@ else
     echo "ℹ️  Используйте существующие учетные данные MySQL для доступа к phpMyAdmin"
 fi
 
-# --- 14. Финальная проверка ---
+# --- 15. Настройка прав для веб-директорий ---
+echo "📁 Настраиваем права доступа для веб-директорий..."
+
+# Настраиваем права для директории Nginx (если нужно)
+NGINX_WEB_ROOT="/var/www"
+if [ -d "$NGINX_WEB_ROOT" ]; then
+    sudo chown -R www-data:www-data "$NGINX_WEB_ROOT"
+    sudo chmod -R 755 "$NGINX_WEB_ROOT"
+    # Даем пользователю права на запись
+    sudo chmod g+w "$NGINX_WEB_ROOT"
+    echo "✅ Права доступа настроены для $NGINX_WEB_ROOT"
+fi
+
+# --- 16. Финальная проверка ---
 echo "🔍 Проверяем конфигурацию..."
 
 # Проверка сервисов
@@ -401,6 +436,15 @@ else
     exit 1
 fi
 
+# Проверка членства в группе www-data
+echo "👥 Проверяем членство в группах..."
+if user_in_group "$CURRENT_USER" "www-data"; then
+    echo "✅ Пользователь $CURRENT_USER в группе www-data"
+else
+    echo "⚠️  Пользователь $CURRENT_USER не в группе www-data"
+    echo "   Выполните команду: newgrp www-data"
+fi
+
 # Проверка версий
 echo "📊 Версии установленного ПО:"
 echo "PHP: $(php -v | head -n1)"
@@ -419,6 +463,7 @@ echo "🎉 Развёртывание завершено!"
 echo ""
 echo "📝 Что сделано:"
 echo "   ✅ Обновлена система и установлены базовые утилиты"
+echo "   ✅ Пользователь $CURRENT_USER добавлен в группу www-data"
 echo "   ✅ Проверены/настроены настройки Git"
 if [[ $generate_ssh == "y" || $generate_ssh == "Y" ]]; then
     echo "   ✅ Сгенерированы SSH ключи для GitHub"
@@ -429,6 +474,7 @@ fi
 echo "   ✅ Установлены и настроены: Nginx, MariaDB, PHP $PHP_VERSION"
 echo "   ✅ Установлены: Composer, Node.js, npm"
 echo "   ✅ Установлен и настроен phpMyAdmin $PHPMYADMIN_VERSION"
+echo "   ✅ Настроены права доступа для веб-директорий"
 echo ""
 echo "🚀 Дальнейшие действия:"
 echo "   1. phpMyAdmin доступен по адресу: http://localhost:8080"
@@ -448,4 +494,5 @@ echo "⚠️  Важно:"
 echo "   - phpMyAdmin доступен на порту 8080 для безопасности"
 echo "   - Настройте брандмауэр если необходимо открыть доступ к phpMyAdmin"
 echo "   - Для продакшн-среды настройте HTTPS и аутентификацию для phpMyAdmin"
+echo "   - Группа www-data дает права на запись в веб-директории"
 echo ""
