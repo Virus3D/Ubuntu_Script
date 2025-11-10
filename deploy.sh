@@ -11,11 +11,11 @@ ORANGE='\033[0;33m'
 NC='\033[0m'
 
 # Функции для вывода сообщений
-error() { 
+error() {
     echo -e "${RED}[Ошибка] $1${NC}" >&2
     return 1
 }
-critical_error() { 
+critical_error() {
     echo -e "${RED}[Критическая ошибка] $1${NC}" >&2
     exit 1
 }
@@ -42,17 +42,17 @@ handle_error() {
     local error_msg="$1"
     local step_name="${2:-$CURRENT_STEP}"
     local critical="${3:-0}"
-    
+
     ERROR_OCCURRED=1
     ERROR_MESSAGES+=("$step_name: $error_msg")
-    
+
     echo -e "${RED}╔══════════════════════════════════════════════════════════════╗${NC}"
     echo -e "${RED}║                        ОШИБКА                                ║${NC}"
     echo -e "${RED}╠══════════════════════════════════════════════════════════════╣${NC}"
     echo -e "${RED}║ Шаг: $step_name${NC}"
     echo -e "${RED}║ Ошибка: $error_msg${NC}"
     echo -e "${RED}╚══════════════════════════════════════════════════════════════╝${NC}"
-    
+
     if [ "$critical" -eq 1 ]; then
         echo ""
         read -p "Критическая ошибка! Продолжить установку? (y/N): " -n 1 -r
@@ -98,17 +98,17 @@ safe_execute() {
     local command="$1"
     local step_name="$2"
     local critical="${3:-0}"
-    
+
     SKIP_STEP=0
-    
+
     # Пропускаем выполнение если предыдущий шаг был пропущен из-за ошибки
     if [ $ERROR_OCCURRED -eq 1 ] && [ $SKIP_STEP -eq 1 ]; then
         warn "Пропускаем выполнение: $step_name"
         return 0
     fi
-    
+
     set_current_step "$step_name"
-    
+
     # Выполняем команду с перехватом ошибок
     if eval "$command"; then
         info "✓ $step_name выполнен успешно"
@@ -123,7 +123,7 @@ safe_execute() {
 safe_mkdir() {
     local dir="$1"
     local step_name="${2:-Создание директории $dir}"
-    
+
     safe_execute "mkdir -p '$dir'" "$step_name" 0
     if [ $? -eq 0 ] && [ $SKIP_STEP -eq 0 ]; then
         safe_execute "chown -R www-data:www-data '$dir'" "Настройка прав для $dir" 0
@@ -133,7 +133,7 @@ safe_mkdir() {
 safe_chown() {
     local path="$1"
     local step_name="${2:-Настройка прав для $path}"
-    
+
     safe_execute "chown -R www-data:www-data '$path'" "$step_name" 0
 }
 
@@ -141,7 +141,7 @@ safe_chmod() {
     local path="$1"
     local mode="$2"
     local step_name="${3:-Настройка прав доступа для $path}"
-    
+
     safe_execute "chmod -R $mode '$path'" "$step_name" 0
 }
 
@@ -149,7 +149,7 @@ safe_systemctl() {
     local action="$1"
     local service="$2"
     local step_name="${3:-Системная служба $service}"
-    
+
     safe_execute "systemctl $action '$service'" "$step_name" 0
 }
 
@@ -173,7 +173,7 @@ validate_project_name() {
 
 validate_domain() {
     local domain="$1"
-    if [[ ! "$domain" =~ ^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; then
+    if [[ ! "$domain" =~ ^[a-zA-Z0-9.-_]+\.[a-zA-Z]{2,}$ ]]; then
         error "Некорректный формат домена"
         return 1
     fi
@@ -184,7 +184,7 @@ validate_project_type() {
     local type="$1"
     case "$type" in
         static|php|laravel|symfony|bitrix|nodejs) ;;
-        *) 
+        *)
             error "Неизвестный тип проекта. Допустимые: static, php, laravel, symfony, bitrix, nodejs"
             return 1
             ;;
@@ -196,7 +196,7 @@ validate_environment() {
     local env="$1"
     case "$env" in
         dev|prod) ;;
-        *) 
+        *)
             error "Неизвестное окружение. Допустимые: dev, prod"
             return 1
             ;;
@@ -216,23 +216,23 @@ validate_git_url() {
 validate_php_version() {
     local version="$1"
     local project_type="$2"
-    
+
     if [[ ! "$version" =~ ^[0-9]+\.[0-9]+$ ]]; then
         error "Некорректный формат версии PHP (используйте формат: 8.1, 8.2, etc.)"
         return 1
     fi
-    
+
     # Проверка установленной версии PHP
     if ! command -v "php$version" &> /dev/null && ! command -v "php" &> /dev/null; then
         error "PHP $version не найден в системе. Установите его сначала."
         return 1
     fi
-    
+
     # Проверка минимальных требований для Bitrix
     if [ "$project_type" = "bitrix" ]; then
         local major=$(echo "$version" | cut -d. -f1)
         local minor=$(echo "$version" | cut -d. -f2)
-        
+
         if [ "$major" -lt 7 ] || ([ "$major" -eq 7 ] && [ "$minor" -lt 4 ]) || [ "$major" -gt 8 ]; then
             warn "Bitrix24 рекомендует PHP 7.4-8.1. Выбрана версия: $version"
             read -p "Продолжить с PHP $version? (y/n): " continue_php
@@ -241,21 +241,68 @@ validate_php_version() {
             fi
         fi
     fi
-    
+
     return 0
 }
 
 check_existing_domain() {
     local domain="$1"
     local exclude_project="$2"
-    
+
     if [ -f "/etc/nginx/sites-available/$project_name" ] || [ -f "/etc/nginx/sites-enabled/$project_name" ]; then
         if [ "$mode" != "rebuild" ] || [ "$project_name" != "$exclude_project" ]; then
-            error "Конфигурация Nginx для проекта $project_name уже существует"
-            return 1
+            warn "Конфигурация Nginx для проекта $project_name уже существует"
+            # Предлагаем варианты действий
+            echo ""
+            echo "Выберите действие:"
+            echo "  1) Обновить конфигурацию (удалить старую и создать новую)"
+            echo "  2) Переименовать проект"
+            echo "  3) Прервать установку"
+
+            while true; do
+                read -p "Введите номер варианта (1-3): " action_choice
+                case "$action_choice" in
+                    1)
+                        info "Обновление конфигурации проекта '$project_name'..."
+
+                        # Удаляем старые конфиги
+                        safe_execute "rm -f '/etc/nginx/sites-available/$project_name'" "Удаление конфига sites-available" 0
+                        safe_execute "rm -f '/etc/nginx/sites-enabled/$project_name'" "Удаление конфига sites-enabled" 0
+
+                        # Перезагружаем службы
+                        safe_systemctl "reload" "nginx" "Перезагрузка Nginx"
+
+                        info "Старая конфигурация удалена. Продолжаем установку..."
+                        break
+                        ;;
+                    2)
+                        read -p "Введите новое имя проекта: " new_project_name
+                        if validate_project_name "$new_project_name"; then
+                            project_name="$new_project_name"
+                            info "Проект переименован в: $project_name"
+
+                            # Обновляем связанные переменные
+                            project_dir="/var/www/$project_name"
+                            if is_php; then
+                                fpm_pool_name=${fpm_pool_name:-$project_name}
+                            fi
+                            break
+                        else
+                            warn "Некорректное имя проекта, попробуйте снова"
+                        fi
+                        ;;
+                    3)
+                        error "Установка прервана пользователем"
+                        return 1
+                        ;;
+                    *)
+                        warn "Неверный выбор. Попробуйте снова."
+                        ;;
+                esac
+            done
         fi
     fi
-    
+
     # Проверка существования домена в конфигах nginx
     if grep -r "server_name.*$domain" /etc/nginx/sites-available/ >/dev/null 2>&1; then
         if [ "$mode" != "rebuild" ] || [ "$project_name" != "$exclude_project" ]; then
@@ -263,13 +310,13 @@ check_existing_domain() {
             return 1
         fi
     fi
-    
+
     return 0
 }
 
 detect_php_versions() {
     local versions=()
-    
+
     # Поиск установленных версий PHP
     for version_dir in /etc/php/*; do
         if [[ -d "$version_dir/fpm" ]]; then
@@ -277,7 +324,7 @@ detect_php_versions() {
             versions+=("$version")
         fi
     done
-    
+
     # Если не нашли через директории, проверяем доступные команды php
     if [ ${#versions[@]} -eq 0 ]; then
         for cmd in /usr/bin/php*; do
@@ -287,13 +334,13 @@ detect_php_versions() {
             fi
         done
     fi
-    
+
     # Если все еще пусто, проверяем общую команду php
     if [ ${#versions[@]} -eq 0 ] && command -v php &> /dev/null; then
         default_version=$(php -r "echo PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION;")
         versions+=("$default_version")
     fi
-    
+
     echo "${versions[@]}"
 }
 
@@ -315,21 +362,21 @@ get_default_php_version() {
 check_bitrix_requirements() {
     local php_version="$1"
     bitrix_info "Проверка требований для Bitrix24..."
-    
+
     # Проверка расширений PHP
     local required_extensions=(
         "mbstring" "xml" "json" "curl" "gd" "mysqlnd" "pdo_mysql"
         "zip" "bcmath" "iconv" "soap" "intl"
     )
-    
+
     local missing_extensions=()
-    
+
     for ext in "${required_extensions[@]}"; do
         if ! php -m | grep -q "$ext"; then
             missing_extensions+=("$ext")
         fi
     done
-    
+
     if [ ${#missing_extensions[@]} -gt 0 ]; then
         warn "Отсутствуют расширения PHP: ${missing_extensions[*]}"
         read -p "Установить недостающие расширения? (y/n): " install_ext
@@ -347,7 +394,7 @@ check_bitrix_requirements() {
 save_project_config() {
     local project_dir="$1"
     local config_file="$project_dir/.deploy-config"
-    
+
     safe_execute "cat > '$config_file' << EOF
 # Конфигурация проекта $project_name
 PROJECT_NAME=$project_name
@@ -363,7 +410,7 @@ UPDATED_AT=\$(date +\"%Y-%m-%d %H:%M:%S\")
 INSTALLATION_STATUS=$([ \$ERROR_OCCURRED -eq 0 ] && echo "COMPLETED" || echo "PARTIAL")
 ERRORS=${#ERROR_MESSAGES[@]}
 EOF" "Сохранение конфигурации проекта" 0
-    
+
     if [ $? -eq 0 ]; then
         safe_chmod "$config_file" "600"
         safe_chown "$config_file"
@@ -374,7 +421,7 @@ EOF" "Сохранение конфигурации проекта" 0
 load_project_config() {
     local project_dir="$1"
     local config_file="$project_dir/.deploy-config"
-    
+
     if [ -f "$config_file" ]; then
         source "$config_file"
         info "Загружена конфигурация проекта из $config_file"
@@ -387,7 +434,7 @@ load_project_config() {
 # Функция пересборки проекта
 rebuild_project() {
     rebuild_info "=== ПЕРЕСБИЛД ПРОЕКТА ==="
-    
+
     # Поиск проектов в /var/www
     local projects=()
     for dir in /var/www/*; do
@@ -395,35 +442,35 @@ rebuild_project() {
             projects+=("$(basename "$dir")")
         fi
     done
-    
+
     if [ ${#projects[@]} -eq 0 ]; then
         critical_error "Не найдено проектов с конфигурацией для пересборки"
     fi
-    
+
     echo "Доступные проекты:"
     for i in "${!projects[@]}"; do
         echo "  $((i+1))) ${projects[$i]}"
     done
-    
+
     read -p "Выберите проект для пересборки (1-${#projects[@]}): " project_choice
     local selected_project="${projects[$((project_choice-1))]}"
-    
+
     if [ -z "$selected_project" ]; then
         critical_error "Неверный выбор проекта"
     fi
-    
+
     local project_dir="/var/www/$selected_project"
     if ! load_project_config "$project_dir"; then
         critical_error "Не удалось загрузить конфигурацию проекта"
     fi
-    
+
     rebuild_info "Пересборка проекта: $selected_project"
     echo "Текущая конфигурация:"
     echo "  Домен: $DOMAIN"
     echo "  Тип: $PROJECT_TYPE"
     echo "  Окружение: $ENVIRONMENT"
     echo "  PHP: $PHP_VERSION"
-    
+
     # Предлагаем изменить параметры
     read -p "Изменить конфигурацию? (y/n): " change_config
     if [ "$change_config" = "y" ]; then
@@ -431,7 +478,7 @@ rebuild_project() {
         local old_domain="$DOMAIN"
         local old_environment="$ENVIRONMENT"
         local old_php_version="$PHP_VERSION"
-        
+
         # Запрашиваем новые значения
         read -p "Домен [$old_domain]: " new_domain
         domain="${new_domain:-$old_domain}"
@@ -441,13 +488,13 @@ rebuild_project() {
         if ! check_existing_domain "$domain" "$selected_project"; then
             critical_error "Домен уже используется"
         fi
-        
+
         read -p "Окружение (dev/prod) [$old_environment]: " new_environment
         environment="${new_environment:-$old_environment}"
         if ! validate_environment "$environment"; then
             critical_error "Некорректное окружение"
         fi
-        
+
         if [[ "$PROJECT_TYPE" == "php" || "$PROJECT_TYPE" == "laravel" || "$PROJECT_TYPE" == "symfony" || "$PROJECT_TYPE" == "bitrix" ]]; then
             read -p "Версия PHP [$old_php_version]: " new_php_version
             php_version="${new_php_version:-$old_php_version}"
@@ -455,12 +502,12 @@ rebuild_project() {
                 critical_error "Некорректная версия PHP"
             fi
         fi
-        
+
         # Обновляем переменные
         project_name="$selected_project"
         project_type="$PROJECT_TYPE"
         fpm_pool_name="$FPM_POOL_NAME"
-        
+
         rebuild_info "Новая конфигурация:"
         echo "  Домен: $domain"
         echo "  Окружение: $environment"
@@ -476,32 +523,32 @@ rebuild_project() {
         db_name="$DB_NAME"
         db_user="$DB_USER"
     fi
-    
+
     # Удаляем старые конфиги
     rebuild_info "Удаление старых конфигураций..."
-    
+
     # Удаляем конфиг nginx
     if [ -f "/etc/nginx/sites-available/$project_name" ]; then
         safe_execute "rm -f '/etc/nginx/sites-available/$project_name'" "Удаление старого конфига nginx" 0
     fi
-    
+
     if [ -f "/etc/nginx/sites-enabled/$project_name" ]; then
         safe_execute "rm -f '/etc/nginx/sites-enabled/$project_name'" "Удаление ссылки nginx" 0
     fi
-    
+
     # Удаляем старый PHP-FPM пул
     if [ -n "$php_version" ] && [ -f "/etc/php/$php_version/fpm/pool.d/$fpm_pool_name.conf" ]; then
         safe_execute "rm -f '/etc/php/$php_version/fpm/pool.d/$fpm_pool_name.conf'" "Удаление старого PHP-FPM пула" 0
     fi
-    
+
     # Перезагружаем службы
     safe_systemctl "reload" "nginx"
     if [ -n "$php_version" ]; then
         safe_systemctl "reload" "php$php_version-fpm"
     fi
-    
+
     rebuild_info "Старые конфигурации удалены"
-    
+
     # Устанавливаем режим пересборки
     mode="rebuild"
 }
@@ -510,16 +557,16 @@ setup_git_workflow() {
     local project_type="$1"
     local environment="$2"
     local project_dir="$3"
-    
+
     step "Настройка Git workflow для окружения $environment..."
-    
+
     # Проверяем, существует ли уже .gitignore
     local gitignore_file="$project_dir/.gitignore"
     if [ -f "$gitignore_file" ]; then
         info "Файл .gitignore уже существует, пропускаем создание"
         return 0
     fi
-    
+
     # Создание .gitignore в зависимости от типа проекта
     case "$project_type" in
         laravel|symfony|php)
@@ -613,10 +660,10 @@ Thumbs.db
 # Deployment scripts
 deploy.sh
 EOF" "Создание .gitignore для Bitrix24" 0
-            
+
             if [ $? -eq 0 ]; then
                 bitrix_info "Создан .gitignore для Bitrix24"
-                
+
                 # Создание README с инструкциями по Git workflow (только если не существует)
                 local readme_file="$project_dir/README.git.md"
                 if [ ! -f "$readme_file" ]; then
@@ -625,7 +672,7 @@ EOF" "Создание .gitignore для Bitrix24" 0
 
 ## Структура веток
 - \`main\`/prod - боевая версия
-- \`stage\` - тестовый сервер  
+- \`stage\` - тестовый сервер
 - \`dev\` - разработка
 
 ## Что коммитить в Git:
@@ -642,7 +689,7 @@ EOF" "Создание .gitignore для Bitrix24" 0
 
 ## Процесс разработки:
 1. Разработка в ветке \`dev\`
-2. Тестирование в \`stage\` 
+2. Тестирование в \`stage\`
 3. Деплой на продакшен из \`main\`
 EOF" "Создание README.git.md" 0
                 else
@@ -710,17 +757,17 @@ case \"\\\$ENV\" in
     dev)
         # Настройки для разработки
         echo \"DEV environment configuration\"
-        
+
         # Для PHP проектов
         if [[ \"$project_type\" == \"php\" || \"$project_type\" == \"laravel\" || \"$project_type\" == \"symfony\" || \"$project_type\" == \"bitrix\" ]]; then
             # Включаем вывод ошибок для разработки
             sed -i \"s/display_errors = Off/display_errors = On/\" /etc/php/$php_version/fpm/php.ini 2>/dev/null || true
             sed -i \"s/error_reporting = .*/error_reporting = E_ALL/\" /etc/php/$php_version/fpm/php.ini 2>/dev/null || true
-            
+
             # Перезагрузка PHP-FPM
             systemctl reload php$php_version-fpm
         fi
-        
+
         # Для Bitrix
         if [ \"$project_type\" = \"bitrix\" ]; then
             # Включаем режим отладки
@@ -729,21 +776,21 @@ case \"\\\$ENV\" in
             fi
         fi
         ;;
-        
+
     prod)
         # Настройки для продакшена
         echo \"PROD environment configuration\"
-        
+
         # Для PHP проектов
         if [[ \"$project_type\" == \"php\" || \"$project_type\" == \"laravel\" || \"$project_type\" == \"symfony\" || \"$project_type\" == \"bitrix\" ]]; then
             # Выключаем вывод ошибок
             sed -i \"s/display_errors = On/display_errors = Off/\" /etc/php/$php_version/fpm/php.ini 2>/dev/null || true
             sed -i \"s/error_reporting = .*/error_reporting = E_ALL \\\& ~E_DEPRECATED \\\& ~E_STRICT/\" /etc/php/$php_version/fpm/php.ini 2>/dev/null || true
-            
+
             # Перезагрузка PHP-FPM
             systemctl reload php$php_version-fpm
         fi
-        
+
         # Для Bitrix
         if [ \"$project_type\" = \"bitrix\" ]; then
             # Выключаем режим отладки
@@ -766,9 +813,9 @@ EOF" "Создание скрипта настройки окружения" 0
 create_backup() {
     local backup_dir="/var/backups/$project_name"
     local timestamp=$(date +%Y%m%d_%H%M%S)
-    
+
     safe_mkdir "$backup_dir"
-    
+
     # Бэкап конфигов
     tar -czf "$backup_dir/config_$timestamp.tar.gz" \
         "/etc/nginx/sites-available/$project_name" \
@@ -779,7 +826,7 @@ create_backup() {
 
 validate_dependencies() {
     local missing_deps=()
-    
+
     case "$project_type" in
         laravel|symfony)
             if ! command -v composer &> /dev/null; then
@@ -792,7 +839,7 @@ validate_dependencies() {
             fi
             ;;
     esac
-    
+
     if [ ${#missing_deps[@]} -gt 0 ]; then
         error "Отсутствуют зависимости: ${missing_deps[*]}"
         return 1
@@ -862,7 +909,7 @@ if [ "$mode" = "install" ]; then
                 critical_error "Установка прервана"
             fi
         fi
-        
+
         # Проверка существования директории
         if [ -d "/var/www/$project_name" ]; then
             warn "Директория /var/www/$project_name уже существует"
@@ -924,19 +971,19 @@ if [ "$mode" = "install" ] && is_php; then
     BITRIX_PHP_OPTIMIZED=0
     available_versions=($(detect_php_versions))
     default_version=$(get_default_php_version)
-    
+
     if [ ${#available_versions[@]} -eq 0 ]; then
         critical_error "Не найдены установленные версии PHP"
     fi
-    
+
     echo "Доступные версии PHP: ${available_versions[*]}"
-    
+
     # Рекомендуемая версия для Bitrix
     if [ "$project_type" = "bitrix" ]; then
         default_version="8.1"
         bitrix_info "Рекомендуемая версия PHP для Bitrix24: 7.4-8.1"
     fi
-    
+
     while true; do
         read -p "Выберите версию PHP (по умолчанию: $default_version): " selected_version
         php_version=${selected_version:-$default_version}
@@ -950,12 +997,12 @@ if [ "$mode" = "install" ] && is_php; then
             fi
         fi
     done
-    
+
     # Проверка требований для Bitrix
     if [ "$project_type" = "bitrix" ]; then
         check_bitrix_requirements "$php_version"
     fi
-    
+
     info "Выбрана версия PHP: $php_version"
 fi
 
@@ -1031,15 +1078,74 @@ if [ "$mode" = "install" ]; then
     if is_php; then
         read -p "Имя PHP-FPM пула (по умолчанию: $project_name): " fpm_pool_name
         fpm_pool_name=${fpm_pool_name:-$project_name}
-        
+
         # Валидация имени пула
         if ! validate_project_name "$fpm_pool_name"; then
             critical_error "Некорректное имя PHP-FPM пула"
         fi
-        
+
         # Проверка существования пула
         if [ -f "/etc/php/$php_version/fpm/pool.d/$fpm_pool_name.conf" ]; then
-            critical_error "PHP-FPM пул $fpm_pool_name уже существует"
+            warn "PHP-FPM пул $fpm_pool_name уже существует"
+            # Предлагаем варианты действий
+            echo ""
+            echo "Выберите действие для PHP-FPM пула '$fpm_pool_name':"
+            echo "  1) Обновить пул (удалить старый и создать новый)"
+            echo "  2) Использовать существующий пул (пропустить создание)"
+            echo "  3) Использовать другое имя для пула"
+            echo "  4) Прервать установку"
+
+            while true; do
+                read -p "Введите номер варианта (1-4): " pool_action
+                case "$pool_action" in
+                    1)
+                        info "Обновление PHP-FPM пула '$fpm_pool_name'..."
+
+                        # Удаляем старый пул
+                        safe_execute "rm -f '/etc/php/$php_version/fpm/pool.d/$fpm_pool_name.conf'" "Удаление старого PHP-FPM пула" 0
+
+                        # Перезагружаем PHP-FPM
+                        if systemctl is-active --quiet "php$php_version-fpm"; then
+                            safe_systemctl "reload" "php$php_version-fpm" "Перезагрузка PHP-FPM после удаления пула"
+                        fi
+
+                        info "Старый PHP-FPM пул удален. Будет создан новый."
+                        break
+                        ;;
+                    2)
+                        info "Используем существующий PHP-FPM пул '$fpm_pool_name'"
+                        SKIP_FPM_POOL_CREATION=1
+                        break
+                        ;;
+                    3)
+                        read -p "Введите новое имя для PHP-FPM пула: " new_fpm_pool_name
+                        if validate_project_name "$new_fpm_pool_name"; then
+                            # Проверяем, не существует ли уже новый пул
+                            if [ -f "/etc/php/$php_version/fpm/pool.d/$new_fpm_pool_name.conf" ]; then
+                                warn "PHP-FPM пул '$new_fpm_pool_name' также уже существует"
+                                read -p "Попробовать другое имя? (Y/n): " try_another
+                                if [[ $try_another =~ ^[Nn]$ ]]; then
+                                    continue
+                                fi
+                            else
+                                fpm_pool_name="$new_fpm_pool_name"
+                                info "Имя PHP-FPM пула изменено на: $fpm_pool_name"
+                                break
+                            fi
+                        else
+                            warn "Некорректное имя пула, попробуйте снова"
+                        fi
+                        ;;
+                    4)
+                        critical_error "Установка прервана пользователем"
+                        ;;
+                    *)
+                        warn "Неверный выбор. Попробуйте снова."
+                        ;;
+                esac
+            done
+        else
+            SKIP_FPM_POOL_CREATION=0
         fi
     fi
 fi
@@ -1071,12 +1177,13 @@ step "Начало установки..."
 project_dir="/var/www/$project_name"
 if [ "$mode" = "install" ]; then
     safe_mkdir "$project_dir" "Создание корневой директории проекта"
+    safe_chmod "$project_dir" "775" "Установка прав корневой директории проекта"
 fi
 
 # Установка Bitrix24 (только для новой установки)
 if [ "$mode" = "install" ] && [ "$project_type" = "bitrix" ]; then
     step "Установка Bitrix24..."
-    
+
     case "$bitrix_install_method" in
         1)
             # Клонирование из GitHub
@@ -1099,7 +1206,7 @@ if [ "$mode" = "install" ] && [ "$project_type" = "bitrix" ]; then
             info "Ручная установка - убедитесь что файлы Bitrix24 находятся в $project_dir"
             ;;
     esac
-    
+
     if [ $ERROR_OCCURRED -eq 0 ] || [ $SKIP_STEP -eq 0 ]; then
         # Создание необходимых директорий для Bitrix
         safe_mkdir "$project_dir/upload" "Создание директории upload для Bitrix"
@@ -1107,7 +1214,7 @@ if [ "$mode" = "install" ] && [ "$project_type" = "bitrix" ]; then
         safe_mkdir "$project_dir/bitrix/managed_cache" "Создание директории managed_cache для Bitrix"
         safe_mkdir "$project_dir/bitrix/stack_cache" "Создание директории stack_cache для Bitrix"
         safe_mkdir "$project_dir/bitrix/html_pages" "Создание директории html_pages для Bitrix"
-        
+
         # Права доступа для Bitrix
         safe_chown "$project_dir" "Настройка прав доступа для Bitrix"
         safe_execute "find '$project_dir' -type f -exec chmod 644 {} \;" "Установка прав файлов Bitrix" 0
@@ -1117,7 +1224,7 @@ if [ "$mode" = "install" ] && [ "$project_type" = "bitrix" ]; then
         safe_chmod "$project_dir/bitrix/managed_cache" "775" "Установка прав для managed_cache"
         safe_chmod "$project_dir/bitrix/stack_cache" "775" "Установка прав для stack_cache"
         safe_chmod "$project_dir/bitrix/html_pages" "775" "Установка прав для html_pages"
-        
+
         bitrix_info "Созданы директории и установлены права доступа"
     fi
 fi
@@ -1143,93 +1250,96 @@ fi
 # Создание PHP-FPM пула
 if is_php; then
     step "Настройка PHP-FPM пула..."
-    
-    fpm_pool_conf="/etc/php/$php_version/fpm/pool.d/$fpm_pool_name.conf"
-    
-    # Определяем параметры в зависимости от типа проекта и окружения
-    case "$environment" in
-        dev)
-            # Настройки для разработки
-            case "$project_type" in
-                laravel|symfony)
-                    pm_max_children=8
-                    pm_start_servers=3
-                    pm_min_spare_servers=2
-                    pm_max_spare_servers=4
-                    memory_limit="256M"
-                    max_execution_time="120"
-                    display_errors="On"
-                    error_reporting="E_ALL"
-                    ;;
-                bitrix)
-                    pm_max_children=15
-                    pm_start_servers=6
-                    pm_min_spare_servers=3
-                    pm_max_spare_servers=8
-                    memory_limit="512M"
-                    max_execution_time="120"
-                    display_errors="On"
-                    error_reporting="E_ALL"
-                    ;;
-                *)
-                    pm_max_children=5
-                    pm_start_servers=2
-                    pm_min_spare_servers=1
-                    pm_max_spare_servers=3
-                    memory_limit="256M"
-                    max_execution_time="60"
-                    display_errors="On"
-                    error_reporting="E_ALL"
-                    ;;
-            esac
-            ;;
-        prod)
-            # Настройки для продакшена
-            case "$project_type" in
-                laravel|symfony)
-                    pm_max_children=20
-                    pm_start_servers=8
-                    pm_min_spare_servers=4
-                    pm_max_spare_servers=12
-                    memory_limit="512M"
-                    max_execution_time="60"
-                    display_errors="Off"
-                    error_reporting="E_ALL & ~E_DEPRECATED"
-                    ;;
-                bitrix)
-                    pm_max_children=30
-                    pm_start_servers=12
-                    pm_min_spare_servers=6
-                    pm_max_spare_servers=18
-                    memory_limit="768M"
-                    max_execution_time="120"
-                    display_errors="Off"
-                    error_reporting="E_ALL & ~E_DEPRECATED"
-                    ;;
-                *)
-                    pm_max_children=10
-                    pm_start_servers=4
-                    pm_min_spare_servers=2
-                    pm_max_spare_servers=6
-                    memory_limit="256M"
-                    max_execution_time="30"
-                    display_errors="Off"
-                    error_reporting="E_ALL & ~E_DEPRECATED"
-                    ;;
-            esac
-            ;;
-    esac
-    
-    # Оптимизация для Bitrix
-    if [ "$project_type" = "bitrix" ] && [ "$BITRIX_PHP_OPTIMIZED" -eq 1 ]; then
-        upload_max_filesize="128M"
-        post_max_size="128M"
+
+    if [ "${SKIP_FPM_POOL_CREATION:-0}" -eq 1 ]; then
+        info "Пропускаем создание PHP-FPM пула (используем существующий)"
     else
-        upload_max_filesize="64M"
-        post_max_size="64M"
-    fi
-    
-    safe_execute "cat > '$fpm_pool_conf' << EOF
+        fpm_pool_conf="/etc/php/$php_version/fpm/pool.d/$fpm_pool_name.conf"
+
+        # Определяем параметры в зависимости от типа проекта и окружения
+        case "$environment" in
+            dev)
+                # Настройки для разработки
+                case "$project_type" in
+                    laravel|symfony)
+                        pm_max_children=8
+                        pm_start_servers=3
+                        pm_min_spare_servers=2
+                        pm_max_spare_servers=4
+                        memory_limit="256M"
+                        max_execution_time="120"
+                        display_errors="On"
+                        error_reporting="E_ALL"
+                        ;;
+                    bitrix)
+                        pm_max_children=15
+                        pm_start_servers=6
+                        pm_min_spare_servers=3
+                        pm_max_spare_servers=8
+                        memory_limit="512M"
+                        max_execution_time="120"
+                        display_errors="On"
+                        error_reporting="E_ALL"
+                        ;;
+                    *)
+                        pm_max_children=5
+                        pm_start_servers=2
+                        pm_min_spare_servers=1
+                        pm_max_spare_servers=3
+                        memory_limit="256M"
+                        max_execution_time="60"
+                        display_errors="On"
+                        error_reporting="E_ALL"
+                        ;;
+                esac
+                ;;
+            prod)
+                # Настройки для продакшена
+                case "$project_type" in
+                    laravel|symfony)
+                        pm_max_children=20
+                        pm_start_servers=8
+                        pm_min_spare_servers=4
+                        pm_max_spare_servers=12
+                        memory_limit="512M"
+                        max_execution_time="60"
+                        display_errors="Off"
+                        error_reporting="E_ALL & ~E_DEPRECATED"
+                        ;;
+                    bitrix)
+                        pm_max_children=30
+                        pm_start_servers=12
+                        pm_min_spare_servers=6
+                        pm_max_spare_servers=18
+                        memory_limit="768M"
+                        max_execution_time="120"
+                        display_errors="Off"
+                        error_reporting="E_ALL & ~E_DEPRECATED"
+                        ;;
+                    *)
+                        pm_max_children=10
+                        pm_start_servers=4
+                        pm_min_spare_servers=2
+                        pm_max_spare_servers=6
+                        memory_limit="256M"
+                        max_execution_time="30"
+                        display_errors="Off"
+                        error_reporting="E_ALL & ~E_DEPRECATED"
+                        ;;
+                esac
+                ;;
+        esac
+
+        # Оптимизация для Bitrix
+        if [ "$project_type" = "bitrix" ] && [ "$BITRIX_PHP_OPTIMIZED" -eq 1 ]; then
+            upload_max_filesize="128M"
+            post_max_size="128M"
+        else
+            upload_max_filesize="64M"
+            post_max_size="64M"
+        fi
+
+        safe_execute "cat > '$fpm_pool_conf' << EOF
 [$fpm_pool_name]
 user = www-data
 group = www-data
@@ -1259,7 +1369,7 @@ php_admin_value[opcache.max_accelerated_files] = 20000
 php_admin_value[opcache.revalidate_freq] = 2
 
 ; Отключение ограничений для Bitrix
-php_admin_value[disable_functions] = 
+php_admin_value[disable_functions] =
 php_admin_value[safe_mode] = off
 
 env[HOSTNAME] = \$HOSTNAME
@@ -1273,9 +1383,13 @@ env[APP_ENV] = $environment
 env[APP_DEBUG] = $([ \"$environment\" = \"dev\" ] && echo \"true\" || echo \"false\")
 EOF" "Создание PHP-FPM конфигурации" 1
 
-    # Перезагрузка PHP-FPM
-    if [ $? -eq 0 ]; then
-        safe_systemctl "reload" "php$php_version-fpm" "Перезагрузка PHP-FPM"
+        # Перезагрузка PHP-FPM
+        if systemctl is-active --quiet "php$php_version-fpm"; then
+            systemctl reload "php$php_version-fpm"
+            info "PHP-FPM $php_version перезагружен"
+        else
+            warn "Служба PHP-FPM $php_version не запущена, требуется перезапуск вручную"
+        fi
     fi
 fi
 
@@ -1360,7 +1474,7 @@ EOF" "Создание Nginx конфигурации для PHP" 1
 
     laravel)
         root_dir="$project_dir/public"
-        
+
         safe_execute "cat > '$nginx_conf' << EOF
 server {
     listen 80;
@@ -1391,7 +1505,7 @@ EOF" "Создание Nginx конфигурации для Laravel" 1
 
     symfony)
         root_dir="$project_dir/public"
-        
+
         safe_execute "cat > '$nginx_conf' << EOF
 server {
     listen 80;
@@ -1465,7 +1579,7 @@ server {
         fastcgi_pass unix:/run/php/php$php_version-fpm-$fpm_pool_name.sock;
         fastcgi_param SCRIPT_FILENAME \\\$realpath_root\\\$fastcgi_script_name;
         fastcgi_param DOCUMENT_ROOT \\\$realpath_root;
-        
+
         # Дополнительные параметры для Bitrix
         fastcgi_buffer_size 128k;
         fastcgi_buffers 4 256k;
@@ -1505,7 +1619,7 @@ EOF" "Создание Nginx конфигурации для Bitrix" 1
 server {
     listen 80;
     server_name $domain;
-    
+
     $access_log
     $error_log
 
@@ -1519,7 +1633,7 @@ server {
         proxy_set_header X-Forwarded-For \\\$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \\\$scheme;
         proxy_cache_bypass \\\$http_upgrade;
-        
+
         # Timeouts
         proxy_connect_timeout 60s;
         proxy_send_timeout 60s;
@@ -1543,23 +1657,23 @@ fi
 # Создание БД (только для новой установки)
 if [ "$mode" = "install" ] && [ "$create_db" = "y" ] && ([ $ERROR_OCCURRED -eq 0 ] || [ $SKIP_STEP -eq 0 ]); then
     step "Создание базы данных..."
-    
+
     # Добавляем префикс окружения к имени БД
     if [ "$environment" = "prod" ]; then
         db_name="${project_name}_prod"
     else
         db_name="${project_name}_dev"
     fi
-    
+
     db_user="${project_name}_user"
     db_pass=$(openssl rand -base64 16 | tr -dc 'a-zA-Z0-9' | head -c 16)
-    
+
     # Валидация имени БД и пользователя
     safe_execute "mysql -e 'SELECT 1'" "Проверка подключения к MySQL" 0
-    
+
     # Проверка существования БД
     safe_execute "! mysql -e 'USE $db_name' 2>/dev/null" "Проверка отсутствия БД $db_name" 0
-    
+
     safe_execute "mysql -e 'CREATE DATABASE \`$db_name\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;'" "Создание БД $db_name" 0
     safe_execute "mysql -e \"CREATE USER '$db_user'@'localhost' IDENTIFIED BY '$db_pass';\"" "Создание пользователя БД" 0
     safe_execute "mysql -e 'GRANT ALL PRIVILEGES ON \`$db_name\`.* TO '\"'$db_user'\"'@'\''localhost'\'';'" "Назначение прав пользователю" 0
@@ -1569,7 +1683,7 @@ if [ "$mode" = "install" ] && [ "$create_db" = "y" ] && ([ $ERROR_OCCURRED -eq 0
         info "Создана БД: $db_name"
         info "Пользователь БД: $db_user"
         info "Пароль БД: $db_pass"
-        
+
         # Создание файла с данными БД
         safe_execute "cat > '$project_dir/database_credentials.txt' << EOF
 Окружение: $environment
@@ -1585,7 +1699,7 @@ EOF" "Создание файла с данными БД" 0
             warn "Данные БД сохранены в $project_dir/database_credentials.txt"
         fi
     fi
-    
+
     # Для Bitrix создаем дополнительный файл с настройками
     if [ "$project_type" = "bitrix" ]; then
         bitrix_db_file="$project_dir/bitrix/.settings.php"
@@ -1622,7 +1736,7 @@ fi
 case "$project_type" in
     laravel)
         step "Настройка Laravel..."
-        
+
         # Проверка существования composer.json
         if [ -f "$project_dir/composer.json" ]; then
             # Установка прав для storage и bootstrap/cache
@@ -1630,7 +1744,7 @@ case "$project_type" in
             safe_chown "$project_dir/bootstrap/cache" "Настройка прав для bootstrap/cache"
             safe_chmod "$project_dir/storage" "775" "Установка прав для storage"
             safe_chmod "$project_dir/bootstrap/cache" "775" "Установка прав для bootstrap/cache"
-            
+
             # Создание .env файла (только для новой установки)
             if [ "$mode" = "install" ] && [ ! -f "$project_dir/.env" ]; then
                 if [ -f "$project_dir/.env.example" ]; then
@@ -1701,7 +1815,7 @@ EOF" "Создание .env файла" 0
 
     symfony)
         step "Настройка Symfony..."
-        
+
         # Проверка существования composer.json
         if [ -f "$project_dir/composer.json" ]; then
             # Установка прав для var и config
@@ -1709,7 +1823,7 @@ EOF" "Создание .env файла" 0
             safe_chown "$project_dir/config"
             safe_chmod "$project_dir/var" "775"
             safe_chmod "$project_dir/config" "775"
-            
+
             # Копирование .env файла если его нет (только для новой установки)
             if [ "$mode" = "install" ] && [ ! -f "$project_dir/.env" ] && { [ -f "$project_dir/.env.example" ] || [ -f "$project_dir/.env.dist" ]; }; then
                 if [ -f "$project_dir/.env.example" ]; then
@@ -1718,7 +1832,7 @@ EOF" "Создание .env файла" 0
                     cp $project_dir/.env.dist $project_dir/.env
                 fi
                 safe_chown "$project_dir/.env"
-                
+
                 # Обновление .env с данными БД если создавали БД
                 if [ "$create_db" = "y" ]; then
                     # Symfony использует DATABASE_URL
@@ -1726,14 +1840,14 @@ EOF" "Создание .env файла" 0
                     escaped_url=$(printf '%s\n' "$database_url" | sed -e 's/[\/&]/\\&/g')
                     sed -i "s|DATABASE_URL=.*|DATABASE_URL=\"$escaped_url\"|" $project_dir/.env
                 fi
-                
+
                 # Устанавливаем окружение
                 sed -i "s|APP_ENV=.*|APP_ENV=$environment|" $project_dir/.env
                 sed -i "s|APP_DEBUG=.*|APP_DEBUG=$([ "$environment" = "dev" ] && echo "1" || echo "0")|" $project_dir/.env
-                
+
                 warn "Создан .env файл. Проверьте настройки."
             fi
-            
+
             # Создание автоматического .env.local.php для оптимизации
             if [ -f "$project_dir/.env" ]; then
                 sudo -u www-data /usr/bin/php$php_version $project_dir/bin/console --env=prod >/dev/null 2>&1 || true
@@ -1745,12 +1859,12 @@ EOF" "Создание .env файла" 0
 
     bitrix)
         step "Дополнительная настройка Bitrix24..."
-        
+
         # Проверяем наличие необходимых файлов
         if [ ! -f "$project_dir/bitrix/urlrewrite.php" ]; then
             warn "Файл urlrewrite.php не найден. Bitrix24 может требовать дополнительной настройки."
         fi
-        
+
         # Создаем php.ini для Bitrix если нужно
         if [ "$BITRIX_PHP_OPTIMIZED" -eq 1 ]; then
             bitrix_php_ini="/etc/php/$php_version/fpm/conf.d/99-bitrix-$project_name.ini"
@@ -1778,13 +1892,13 @@ opcache.enable_cli = 1
 disable_functions =
 safe_mode = Off
 EOF" "Создание php.ini для Bitrix" 0
-        
+
             if [ $? -eq 0 ]; then
                 safe_systemctl "reload" "php$php_version-fpm" "Перезагрузка PHP-FPM после настройки Bitrix"
                 bitrix_info "Создан оптимизированный php.ini для Bitrix24"
             fi
         fi
-        
+
         # Создаем cron задания для Bitrix
         bitrix_cron="/etc/cron.d/bitrix-$project_name"
         safe_execute "cat > '$bitrix_cron' << EOF
@@ -1796,12 +1910,12 @@ EOF" "Создание php.ini для Bitrix" 0
 # Очистка кеша для dev окружения
 $([ \"$environment\" = \"dev\" ] && echo \"*/15 * * * * www-data rm -rf $project_dir/bitrix/cache/* $project_dir/bitrix/managed_cache/*\")
 EOF" "Создание cron заданий для Bitrix" 0
-        
+
         if [ $? -eq 0 ]; then
             safe_chmod "$bitrix_cron" "644"
             bitrix_info "Добавлены cron задания для Bitrix24"
         fi
-        
+
         # Создаем конфигурационный файл для разных окружений
         bitrix_env_config="$project_dir/bitrix/configuration.php"
         if [ ! -f "$bitrix_env_config" ]; then
@@ -1853,7 +1967,7 @@ case \"$project_type\" in
         if [ ! -f \"composer.phar\" ]; then
             curl -sS https://getcomposer.org/installer | php -- --install-dir=.
         fi
-        
+
         # Установка зависимостей
         if [ \"$project_type\" = \"laravel\" ]; then
             php composer.phar install --no-dev --optimize-autoloader
@@ -1868,14 +1982,14 @@ case \"$project_type\" in
             php bin/console doctrine:migrations:migrate --no-interaction --env=\\\$ENV
         fi
         ;;
-        
+
     bitrix)
         # Обновление Bitrix
         if [ -f \"bitrix/updates/update.php\" ]; then
             echo \"Проверка обновлений Bitrix24...\"
             /usr/bin/php$php_version bitrix/updates/update.php
         fi
-        
+
         # Очистка кеша Bitrix
         if [ -d \"bitrix/cache\" ]; then
             rm -rf bitrix/cache/*
@@ -1976,7 +2090,7 @@ fi
 
 echo "Следующие шаги:"
 case "$project_type" in
-    laravel) 
+    laravel)
         if [ -f "$project_dir/.env" ]; then
             echo "  - Ключ приложения уже сгенерирован"
         else
