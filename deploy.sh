@@ -32,6 +32,13 @@ ERROR_MESSAGES=()
 CURRENT_STEP=""
 SKIP_STEP=0
 
+# Определение владельца файлов в зависимости от окружения
+if [ "$environment" = "dev" ]; then
+    FILE_OWNER="$SUDO_USER:www-data"
+else
+    FILE_OWNER="www-data:www-data"
+fi
+
 # Функции обработки ошибок
 set_current_step() {
     CURRENT_STEP="$1"
@@ -126,7 +133,7 @@ safe_mkdir() {
 
     safe_execute "mkdir -p '$dir'" "$step_name" 0
     if [ $? -eq 0 ] && [ $SKIP_STEP -eq 0 ]; then
-        safe_execute "chown -R www-data:www-data '$dir'" "Настройка прав для $dir" 0
+        safe_execute "chown -R $FILE_OWNER '$dir'" "Настройка прав для $dir" 0
     fi
 }
 
@@ -134,7 +141,7 @@ safe_chown() {
     local path="$1"
     local step_name="${2:-Настройка прав для $path}"
 
-    safe_execute "chown -R www-data:www-data '$path'" "$step_name" 0
+    safe_execute "chown -R $FILE_OWNER '$path'" "$step_name" 0
 }
 
 safe_chmod() {
@@ -964,6 +971,13 @@ if [ "$mode" = "install" ]; then
     info "Выбрано окружение: $environment"
 fi
 
+# Обновляем FILE_OWNER после определения окружения
+if [ "$environment" = "dev" ]; then
+    FILE_OWNER="$SUDO_USER:www-data"
+else
+    FILE_OWNER="www-data:www-data"
+fi
+
 is_php() { [[ "$project_type" == "php" || "$project_type" == "laravel" || "$project_type" == "symfony" || "$project_type" == "bitrix" ]]; }
 # Выбор версии PHP для PHP проектов
 if [ "$mode" = "install" ] && is_php; then
@@ -1732,6 +1746,43 @@ EOF" "Для Bitrix создаем дополнительный файл с на
     fi
 fi
 
+# Установка Composer зависимостей для PHP проектов
+if [ "$mode" = "install" ] && is_php; then
+    step "Установка Composer зависимостей..."
+
+    # Определяем флаги для composer в зависимости от окружения
+    composer_flags=""
+    if [ "$environment" = "prod" ]; then
+        composer_flags="--no-dev --optimize-autoloader --no-interaction"
+    else
+        composer_flags="--no-interaction"
+    fi
+
+    # Проверяем наличие composer.json
+    if [ -f "$project_dir/composer.json" ]; then
+        info "Найден composer.json, устанавливаем зависимости..."
+
+        # Определяем пользователя для запуска composer
+        if [ "$environment" = "dev" ]; then
+            COMPOSER_USER="$SUDO_USER"
+        else
+            COMPOSER_USER="www-data"
+        fi
+
+        # Устанавливаем зависимости
+        safe_execute "cd '$project_dir' && sudo -u $COMPOSER_USER composer install $composer_flags" "Установка Composer зависимостей" 0
+
+        if [ $? -eq 0 ]; then
+            info "Composer зависимости успешно установлены"
+            
+            # Обновляем права после установки зависимостей
+            safe_chown "$project_dir" "Обновление прав после установки зависимостей"
+        fi
+    else
+        info "composer.json не найден, пропускаем установку зависимостей"
+    fi
+fi
+
 # Дополнительные настройки для фреймворков с учетом окружения
 case "$project_type" in
     laravel)
@@ -2001,7 +2052,7 @@ case \"$project_type\" in
 esac
 
 # Права доступа
-chown -R www-data:www-data $project_dir
+chown -R $FILE_OWNER $project_dir
 find $project_dir -type f -exec chmod 644 {} \\\\
 find $project_dir -type d -exec chmod 755 {} \\\\
 
