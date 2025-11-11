@@ -25,6 +25,7 @@ debug() { echo -e "${BLUE}[Отладка] $1${NC}"; }
 step() { echo -e "${PURPLE}[Шаг] $1${NC}"; }
 bitrix_info() { echo -e "${CYAN}[Bitrix] $1${NC}"; }
 rebuild_info() { echo -e "${ORANGE}[Пересборка] $1${NC}"; }
+npm_info() { echo -e "${BLUE}[NPM] $1${NC}"; }
 
 # Глобальные переменные для обработки ошибок
 ERROR_OCCURRED=0
@@ -860,6 +861,75 @@ setup_ssl() {
         if [ "$setup_ssl" = "y" ]; then
             safe_execute "certbot --nginx -d $domain" "Настройка SSL сертификата" 0
         fi
+    fi
+}
+
+# Функция для установки npm зависимостей и запуска скриптов
+setup_npm_dependencies() {
+    local project_dir="$1"
+    local project_type="$2"
+    local environment="$3"
+
+    # Проверяем наличие package.json
+    if [ ! -f "$project_dir/package.json" ]; then
+        info "package.json не найден, пропускаем установку npm зависимостей"
+        return 0
+    fi
+
+    step "Установка npm зависимостей..."
+
+    # Определяем пользователя для запуска npm
+    if [ "$environment" = "dev" ]; then
+        NPM_USER="$SUDO_USER"
+    else
+        NPM_USER="www-data"
+    fi
+
+    # Проверяем установлен ли Node.js и npm
+    if ! command -v node &> /dev/null; then
+        warn "Node.js не установлен, пропускаем установку npm зависимостей"
+        return 0
+    fi
+
+    if ! command -v npm &> /dev/null; then
+        warn "npm не установлен, пропускаем установку npm зависимостей"
+        return 0
+    fi
+
+    # Устанавливаем зависимости
+    safe_execute "cd '$project_dir' && sudo -u $NPM_USER npm install" "Установка npm зависимостей" 0
+
+    if [ $? -eq 0 ]; then
+        npm_info "NPM зависимости успешно установлены"
+
+        # Проверяем наличие скриптов в package.json
+        local has_dev_script=$(cd "$project_dir" && sudo -u $NPM_USER npm run | grep -q " dev " && echo "1" || echo "0")
+        local has_build_script=$(cd "$project_dir" && sudo -u $NPM_USER npm run | grep -q " build " && echo "1" || echo "0")
+        local has_prod_script=$(cd "$project_dir" && sudo -u $NPM_USER npm run | grep -q " prod " && echo "1" || echo "0")
+
+        # Запускаем соответствующие npm скрипты в зависимости от окружения
+        if [ "$environment" = "dev" ]; then
+            if [ "$has_dev_script" = "1" ]; then
+                safe_execute "cd '$project_dir' && sudo -u $NPM_USER npm run dev" "Запуск npm run dev" 0
+            elif [ "$has_build_script" = "1" ]; then
+                safe_execute "cd '$project_dir' && sudo -u $NPM_USER npm run build" "Запуск npm run build" 0
+            else
+                info "Скрипты dev или build не найдены в package.json"
+            fi
+        else
+            if [ "$has_prod_script" = "1" ]; then
+                safe_execute "cd '$project_dir' && sudo -u $NPM_USER npm run prod" "Запуск npm run prod" 0
+            elif [ "$has_build_script" = "1" ]; then
+                safe_execute "cd '$project_dir' && sudo -u $NPM_USER npm run build" "Запуск npm run build" 0
+            else
+                info "Скрипты prod или build не найдены в package.json"
+            fi
+        fi
+
+        # Обновляем права после установки npm зависимостей
+        safe_chown "$project_dir" "Обновление прав после установки npm зависимостей"
+    else
+        warn "Ошибка при установке npm зависимостей"
     fi
 }
 
@@ -1783,6 +1853,11 @@ if [ "$mode" = "install" ] && is_php; then
     fi
 fi
 
+# Установка NPM зависимостей и запуск npm скриптов
+if [ "$mode" = "install" ]; then
+    setup_npm_dependencies "$project_dir" "$project_type" "$environment"
+fi
+
 # Дополнительные настройки для фреймворков с учетом окружения
 case "$project_type" in
     laravel)
@@ -2013,7 +2088,7 @@ fi
 
 # Зависимости PHP проектов
 case \"$project_type\" in
-    laravel|symfony)
+    laravel|symfony|php)
         # Установка/обновление композера
         if [ ! -f \"composer.phar\" ]; then
             curl -sS https://getcomposer.org/installer | php -- --install-dir=.
@@ -2031,6 +2106,8 @@ case \"$project_type\" in
             php bin/console cache:clear --env=\\\$ENV
             php bin/console cache:warmup --env=\\\$ENV
             php bin/console doctrine:migrations:migrate --no-interaction --env=\\\$ENV
+        else
+            php composer.phar install --no-dev --optimize-autoloader
         fi
         ;;
 
@@ -2050,6 +2127,27 @@ case \"$project_type\" in
         fi
         ;;
 esac
+
+# Установка NPM зависимостей
+if [ -f \"package.json\" ]; then
+    echo \"Установка NPM зависимостей...\"
+    npm install
+
+    # Запуск NPM скриптов в зависимости от окружения
+    if [ \"\\\$ENV\" = \"prod\" ]; then
+        if npm run | grep -q \" prod \"; then
+            npm run prod
+        elif npm run | grep -q \" build \"; then
+            npm run build
+        fi
+    else
+        if npm run | grep -q \" dev \"; then
+            npm run dev
+        elif npm run | grep -q \" build \"; then
+            npm run build
+        fi
+    fi
+fi
 
 # Права доступа
 chown -R $FILE_OWNER $project_dir
