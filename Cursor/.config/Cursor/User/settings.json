@@ -1,0 +1,96 @@
+{
+  "editor.codeActionsOnSave": {
+    "source.fixAll.eslint": "explicit",
+    "source.fixAll.stylelint": "explicit"
+  },
+  // ESLint для JavaScript
+  "eslint.enable": true,
+  "eslint.run": "onType",
+  "eslint.lintTask.enable": true,
+  "eslint.options": {
+    "configFile": "~/.eslintrc.js"
+  },
+  "eslint.validate": [
+    "javascript",
+    "javascriptreact",
+    "typescript",
+    "typescriptreact",
+    "vue"
+  ],
+  "eslint.workingDirectories": ["."],
+
+  // Stylelint для CSS
+  "stylelint.enable": true,
+  "stylelint.configFile": "~/.stylelintrc.json",
+  "stylelint.validate": [
+    "css",
+    "scss",
+    "less",
+    "postcss"
+  ],
+
+  // PHP Code Sniffer
+  "phpcs.enable": true,
+  "phpcs.standard": "PSR12",
+  "phpcs.workspaceRoot": null,
+  "phpcs.ignorePatterns": [
+    "**/vendor/**",
+    "**/node_modules/**",
+    "**/storage/**",
+    "**/cache/**"
+  ],
+  "phpcs.showWarnings": true,
+  "phpcs.showSources": true,
+
+  // PHPStan
+  "phpstan.enable": true,
+  "phpstan.level": 5,
+  "phpstan.configFile": "~/.phpstan.neon",
+  "phpstan.workspaceRoot": null,
+
+  // Psalm
+  "psalm.enable": true,
+  "psalm.configFile": "~/psalm.xml",
+
+  // Общие настройки линтинга
+  "editor.codeActionsOnSave": {
+    "source.fixAll.eslint": "explicit",
+    "source.fixAll.stylelint": "explicit"
+  },
+  "editor.formatOnSave": true,
+  "editor.formatOnPaste": false,
+  "editor.formatOnType": false,
+
+  // Оптимизация производительности
+  "files.watcherExclude": {
+    "**/node_modules/**": true,
+    "**/vendor/**": true,
+    "**/storage/**": true,
+    "**/cache/**": true,
+    "**/dist/**": true,
+    "**/build/**": true,
+    "**/*.min.js": true,
+    "**/*.min.css": true
+  },
+  "search.exclude": {
+    "**/node_modules": true,
+    "**/vendor": true,
+    "**/storage": true,
+    "**/cache": true,
+    "**/dist": true,
+    "**/build": true
+  },
+  "files.exclude": {
+    "**/node_modules": true,
+    "**/vendor": true,
+    "**/storage": true,
+    "**/cache": true
+  },
+  "editor.minimap.enabled": false,
+  "editor.occurrencesHighlight": false,
+  "editor.renderLineHighlight": "none",
+  "editor.suggest.snippetsPreventQuickSuggestions": false,
+  "editor.inlineSuggest.enabled": true,
+  "typescript.suggest.autoImports": true,
+  "javascript.suggest.autoImports": true
+}

@@ -17,5 +17,11 @@ module.exports = {
     globals: {
         jQuery: 'readonly',
         $: 'readonly'
-    }
+    },
+    ignorePatterns: [
+        'node_modules/',
+        'dist/',
+        'build/',
+        'coverage/'
+    ]    
 };

@@ -1,0 +1,59 @@
+{
+  "$schema": "./cursor-rules.schema.json",
+  "linting": {
+    "enabled": true,
+    "linters": {
+      "eslint": {
+        "command": "eslint",
+        "args": ["--config", "~/.eslintrc.js", "--format", "json", "--stdin", "--stdin-filename", "${file}"],
+        "rootMatchers": [".eslintrc.js", ".eslintrc", ".eslintignore", "package.json"],
+        "enable": true
+      },
+      "phpcs": {
+        "command": "phpcs",
+        "args": ["--standard=PSR12", "--report=json", "-q", "--stdin-path=${file}"],
+        "rootMatchers": ["phpcs.xml", "phpcs.xml.dist", "ruleset.xml", "composer.json"],
+        "enable": true
+      },
+      "stylelint": {
+        "command": "stylelint",
+        "args": ["--config", "~/.stylelintrc.json", "--formatter", "json", "--stdin", "--stdin-filename", "${file}"],
+        "rootMatchers": [".stylelintrc.js", ".stylelintrc.json", ".stylelintrc", "package.json"],
+        "enable": true
+      }
+    }
+  },
+  "fileWatcher": {
+    "exclude": [
+      "**/node_modules/**",
+      "**/vendor/**",
+      "**/storage/**",
+      "**/cache/**",
+      "**/logs/**",
+      "**/tmp/**",
+      "**/dist/**",
+      "**/build/**",
+      "**/.git/**",
+      "**/*.min.js",
+      "**/*.min.css",
+      "**/package-lock.json",
+      "**/yarn.lock"
+    ]
+  },
+  "typescript": {
+    "preferences": {
+      "includePackageJsonAutoImports": "auto",
+      "includeCompletionsForModuleExports": true
+    }
+  },
+  "javascript": {
+    "preferences": {
+      "includePackageJsonAutoImports": "auto",
+      "includeCompletionsForModuleExports": true
+    }
+  },
+  "completions": {
+    "enabled": true,
+    "maxResults": 10
+  }
+}

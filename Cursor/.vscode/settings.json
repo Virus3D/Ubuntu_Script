@@ -1,0 +1,18 @@
+{
+  "intelephense.environment.includePaths": [
+    "vendor/**"
+  ],
+  "intelephense.files.exclude": [
+    "**/vendor/**/{test,doc,TEST,DOC}",
+    "**/vendor/**/test/**",
+    "**/vendor/**/tests/**"
+  ],
+  "phpsab.composerJsonPath": "composer.json",
+  "phpsab.standard": "PSR12",
+  "phpsab.autoConfigSearch": true,
+  "phpsab.enable": true,
+  "phpsab.debug": false,
+  "[php]": {
+    "editor.defaultFormatter": "valeryanm.vscode-phpsab"
+  }
+}
