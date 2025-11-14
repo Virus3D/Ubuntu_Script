@@ -1,0 +1,45 @@
+includes:
+    - ../vendor/phpstan/phpstan-doctrine/extension.neon
+    - ../vendor/phpstan/phpstan-doctrine/rules.neon
+    - ../vendor/thecodingmachine/phpstan-strict-rules/phpstan-strict-rules.neon
+    - ../vendor/spaze/phpstan-disallowed-calls/extension.neon
+    - ../vendor/ergebnis/phpstan-rules/rules.neon
+    - ../vendor/phpstan/phpstan-deprecation-rules/rules.neon
+    - ../vendor/slam/phpstan-extensions/conf/symfony-rules.neon
+    - ../vendor/shipmonk/phpstan-rules/rules.neon
+    - ../vendor/shipmonk/dead-code-detector/rules.neon
+    - ../vendor/staabm/phpstan-todo-by/extension.neon
+
+parameters:
+    tips:
+        treatPhpDocTypesAsCertain: true
+    level: 6
+    cache:
+        nodesByStringCountMax: 0
+    parallel:
+        maximumNumberOfProcesses: 8
+    paths:
+        - ../src/
+    ergebnis:
+        noIsset:
+            enabled: false
+        noParameterWithNullableTypeDeclaration:
+            enabled: false
+        noParameterWithNullDefaultValue:
+            enabled: false
+        noNullableReturnTypeDeclaration:
+            enabled: false
+        noExtends:
+            enabled: false
+    shipmonkDeadCode:
+        entrypoints:
+            symfony:
+                enabled: true
+    ignoreErrors:
+        - '#Unused .*::__construct#'
+        - '#Unused App\\.*::get.*#'
+        - '#Unused App\\.*::set.*#'
+        - '#Unused App\\Entity\\.*::is.*#'
+        - '#Unused App\\Entity\\.*::add.*#'
+        - '#Unused App\\Entity\\.*::remove.*#'
+

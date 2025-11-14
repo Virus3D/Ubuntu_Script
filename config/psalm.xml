@@ -1,0 +1,44 @@
+<?xml version="1.0"?>
+<psalm
+    phpVersion="8.2"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns="https://getpsalm.org/schema/config"
+    xsi:schemaLocation="https://getpsalm.org/schema/config vendor/vimeo/psalm/config.xsd"
+    autoloader="load.php"
+    allowStringToStandInForClass="true"
+    errorLevel="1"
+    findUnusedBaselineEntry="true"
+    findUnusedCode="true"
+    resolveFromConfigFile="false"
+    threads="4"
+>
+    <projectFiles>
+        <directory name="./" />
+        <ignoreFiles allowMissingFiles="true">
+            <directory name="vendor" />
+            <directory name="temp" />
+            <directory name="notification" />
+            <file name="test.php" />
+        </ignoreFiles>
+    </projectFiles>
+
+    <extraFiles>
+    </extraFiles>
+
+    <issueHandlers>
+        <InvalidGlobal errorLevel="suppress" />
+        <UndefinedDocblockClass>
+            <errorLevel type="suppress">
+                <referencedClass name="UnitEnum" />
+            </errorLevel>
+        </UndefinedDocblockClass>
+    </issueHandlers>
+
+    <plugins>
+        <pluginClass class="Psalm\SymfonyPsalmPlugin\Plugin" />
+    </plugins>
+
+    <fileExtensions>
+        <extension name=".php" />
+    </fileExtensions>
+</psalm>
