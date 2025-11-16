@@ -14,7 +14,7 @@ echo -e "${YELLOW}Домашняя директория: $USER_HOME${NC}"
 
 # Пути к файлам
 SOURCE_FILE="Cursor/.config/Cursor/User/settings.json"
-TARGET_DIR="$HOME/Cursor/.config/Cursor/User"
+TARGET_DIR="$HOME/.config/Cursor/User"
 TARGET_FILE="$TARGET_DIR/settings.json"
 BACKUP_FILE="$TARGET_FILE.backup.$(date +%Y%m%d_%H%M%S)"
 

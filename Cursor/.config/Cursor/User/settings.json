@@ -23,7 +23,7 @@
   ],
   // Stylelint для CSS
   "stylelint.enable": true,
-  "stylelint.configFile": "~/.stylelintrc.json",
+  "stylelint.configFile": "[HOME]/.stylelintrc.json",
   "stylelint.validate": [
     "css",
     "scss",
