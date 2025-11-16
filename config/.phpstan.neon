@@ -1,14 +1,13 @@
 includes:
-    - ../vendor/phpstan/phpstan-doctrine/extension.neon
-    - ../vendor/phpstan/phpstan-doctrine/rules.neon
-    - ../vendor/thecodingmachine/phpstan-strict-rules/phpstan-strict-rules.neon
-    - ../vendor/spaze/phpstan-disallowed-calls/extension.neon
-    - ../vendor/ergebnis/phpstan-rules/rules.neon
-    - ../vendor/phpstan/phpstan-deprecation-rules/rules.neon
-    - ../vendor/slam/phpstan-extensions/conf/symfony-rules.neon
-    - ../vendor/shipmonk/phpstan-rules/rules.neon
-    - ../vendor/shipmonk/dead-code-detector/rules.neon
-    - ../vendor/staabm/phpstan-todo-by/extension.neon
+    - .config/composer/vendor/phpstan/phpstan-doctrine/extension.neon
+    - .config/composer/vendor/phpstan/phpstan-doctrine/rules.neon
+    - .config/composer/vendor/spaze/phpstan-disallowed-calls/extension.neon
+    - .config/composer/vendor/ergebnis/phpstan-rules/rules.neon
+    - .config/composer/vendor/phpstan/phpstan-deprecation-rules/rules.neon
+    - .config/composer/vendor/slam/phpstan-extensions/conf/symfony-rules.neon
+    - .config/composer/vendor/shipmonk/phpstan-rules/rules.neon
+    - .config/composer/vendor/shipmonk/dead-code-detector/rules.neon
+    - .config/composer/vendor/staabm/phpstan-todo-by/extension.neon
 
 parameters:
     tips:
@@ -19,7 +18,7 @@ parameters:
     parallel:
         maximumNumberOfProcesses: 8
     paths:
-        - ../src/
+        - .
     ergebnis:
         noIsset:
             enabled: false
@@ -31,10 +30,6 @@ parameters:
             enabled: false
         noExtends:
             enabled: false
-    shipmonkDeadCode:
-        entrypoints:
-            symfony:
-                enabled: true
     ignoreErrors:
         - '#Unused .*::__construct#'
         - '#Unused App\\.*::get.*#'

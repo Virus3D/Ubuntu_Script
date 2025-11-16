@@ -1,0 +1,18 @@
+{
+    "recommendations": [
+        "devsense.composer-php-vscode",
+        "dbaeumer.vscode-eslint",
+        "stylelint.vscode-stylelint",
+        "valeryanm.vscode-phpsab",
+        "bmewburn.vscode-intelephense-client",
+        "xdebug.php-debug",
+        "devsense.intelli-php-vscode",
+        "devsense.phptools-vscode",
+        "devsense.profiler-php-vscode",
+        "junstyle.php-cs-fixer",
+        "aaron-bond.better-comments",
+        "sleistner.vscode-fileutils",
+        "gruntfuggly.todo-tree",
+        "bierner.markdown-preview-github-styles"
+    ]
+}

@@ -98,11 +98,11 @@ install_npm_global() {
 install_composer_global() {
     local package=$1
     echo -e "${YELLOW}Устанавливаем $package...${NC}"
-    
+
     # Устанавливаем в глобальную директорию Composer
     if composer global require "$package"; then
         echo -e "${GREEN}$package успешно установлен!${NC}"
-        
+
         # Проверяем наличие бинарных файлов
         local package_name=$(echo "$package" | cut -d'/' -f2 | cut -d':' -f1)
         if [ -f "$COMPOSER_BIN/$package_name" ]; then
@@ -120,15 +120,45 @@ copy_config_file() {
     local config_name=$1
     local source_file=$2
     local destination=$3
-    
+
     echo -e "${YELLOW}Копируем конфиг $config_name...${NC}"
-    
+
     if [ -f "$source_file" ]; then
-        cp "$source_file" "$destination"
-        echo -e "${GREEN}Конфиг $config_name успешно скопирован!${NC}"
+        # Копирование с перезаписью и сохранением атрибутов
+        cp -af "$source_file" "$destination" 2>/dev/null
+        if [ $? -eq 0 ]; then
+            echo -e "${GREEN}Конфиг '$config_name' успешно скопирован!${NC}"
+            return 0
+        else
+            echo -e "${RED}Ошибка при копировании конфига '$config_name'${NC}"
+            return 1
+        fi
+    else
+        echo -e "${RED}Конфиг '$config_name' не найден: '$source_file'${NC}"
+        return 1
+    fi
+}
+
+copy_config_dir() {
+    local source_dir="$1"
+    local destination="$2"
+
+    echo -e "${YELLOW}Копируем из директории '$source_dir' в '$destination'...${NC}"
+
+    # Проверяем, что источник существует и является директорией
+    if [ ! -d "$source_dir" ]; then
+        echo -e "${RED}Директория не найдена: '$source_dir'${NC}"
+        return 1
+    fi
+
+    # Копирование с сохранением всех атрибутов (права, время, симлинки)
+    cp -a "$source_dir" "$destination" 2>/dev/null
+
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}Директория '$source_dir' успешно скопирована!${NC}"
         return 0
     else
-        echo -e "${RED}Конфиг $config_name не найден в $source_file${NC}"
+        echo -e "${RED}Ошибка при копировании директории '$source_dir'${NC}"
         return 1
     fi
 }
@@ -224,21 +254,35 @@ EOF
     echo -e "${GREEN}Базовый конфиг HTMLHint создан!${NC}"
 fi
 
+# Предварительная настройка Composer для автоматического подтверждения
+echo -e "${YELLOW}Настраиваем Composer для автоматической установки...${NC}"
+composer global config --no-interaction allow-plugins.dealerdirect/phpcodesniffer-composer-installer true
+composer global config --no-interaction allow-plugins.squizlabs/php_codesniffer true
+
 # Установка PHP инструментов
 echo -e "${YELLOW}Устанавливаем PHP инструменты...${NC}"
 
 # PHP Code Sniffer
 install_composer_global "squizlabs/php_codesniffer"
+install_composer_global "slevomat/coding-standard"
+
+copy_config_dir "$CONFIG_DIR/phpcs-rules" \
+    ~/phpcs-rules
 
 # PHP-CS-Fixer
 install_composer_global "friendsofphp/php-cs-fixer"
+
+# PHP-CS-Fixer конфиг
+copy_config_file "PHP-CS-Fixer" \
+    "$CONFIG_DIR/.php-cs-fixer.dist.php" \
+    ~/.php-cs-fixer.dist.php
 
 # PHPMD (PHP Mess Detector)
 install_composer_global "phpmd/phpmd"
 
 # Копируем конфиг PHPMD
 copy_config_file "PHPMD" \
-    "$CONFIG_DIR/phpmd.xml" \
+    "$CONFIG_DIR/.phpmd.xml" \
     ~/.phpmd.xml
 
 # Если не удалось скопировать, создаем базовый
@@ -254,7 +298,7 @@ if [ $? -ne 0 ]; then
          xsi:noNamespaceSchemaLocation="
                      http://pmd.sf.net/ruleset_xml_schema.xsd">
     <description>Custom PHPMD rule set</description>
-    
+
     <rule ref="rulesets/codesize.xml/CyclomaticComplexity" />
     <rule ref="rulesets/codesize.xml/NPathComplexity" />
     <rule ref="rulesets/codesize.xml/ExcessiveMethodLength" />
@@ -264,13 +308,13 @@ if [ $? -ne 0 ]; then
     <rule ref="rulesets/codesize.xml/TooManyFields" />
     <rule ref="rulesets/codesize.xml/TooManyMethods" />
     <rule ref="rulesets/codesize.xml/ExcessiveClassComplexity" />
-    
+
     <rule ref="rulesets/design.xml" />
-    
+
     <rule ref="rulesets/naming.xml" />
-    
+
     <rule ref="rulesets/unusedcode.xml" />
-    
+
     <rule ref="rulesets/controversial.xml" />
 </ruleset>
 EOF
@@ -280,12 +324,25 @@ fi
 # Psalm
 install_composer_global "vimeo/psalm"
 
+# Psalm конфиг
+copy_config_file "Psalm" \
+    "$CONFIG_DIR/psalm.xml" \
+    ~/psalm.xml
+
 # PHPStan
 install_composer_global "phpstan/phpstan"
+install_composer_global "phpstan/phpstan-doctrine"
+install_composer_global "spaze/phpstan-disallowed-calls"
+install_composer_global "ergebnis/phpstan-rules"
+install_composer_global "phpstan/phpstan-deprecation-rules"
+install_composer_global "slam/phpstan-extensions"
+install_composer_global "shipmonk/phpstan-rules"
+install_composer_global "shipmonk/dead-code-detector"
+install_composer_global "staabm/phpstan-todo-by"
 
 # Копируем конфиг PHPStan
 copy_config_file "PHPStan" \
-    "$CONFIG_DIR/phpstan.neon" \
+    "$CONFIG_DIR/.phpstan.neon" \
     ~/.phpstan.neon
 
 # Если не удалось скопировать, создаем базовый
@@ -304,16 +361,6 @@ fi
 
 # Копируем дополнительные конфиги
 echo -e "${YELLOW}Копируем дополнительные конфиги...${NC}"
-
-# PHP-CS-Fixer конфиг
-copy_config_file "PHP-CS-Fixer" \
-    "$CONFIG_DIR/.php-cs-fixer.dist.php" \
-    ~/.php-cs-fixer.dist.php
-
-# Psalm конфиг
-copy_config_file "Psalm" \
-    "$CONFIG_DIR/psalm.xml" \
-    ~/psalm.xml
 
 # Создаем алиасы для удобства
 if [ -n "$BASH_VERSION" ]; then
@@ -381,7 +428,7 @@ check_tool() {
 }
 
 check_tool "eslint"
-check_tool "stylelint" 
+check_tool "stylelint"
 check_tool "htmlhint"
 check_tool "phpcs" "$COMPOSER_BIN/phpcs"
 check_tool "php-cs-fixer" "$COMPOSER_BIN/php-cs-fixer"
@@ -394,7 +441,7 @@ echo ""
 echo -e "${YELLOW}Установленные конфиги:${NC}"
 configs=(
     ".eslintrc.js"
-    ".stylelintrc.json" 
+    ".stylelintrc.json"
     ".htmlhintrc"
     ".phpmd.xml"
     ".phpstan.neon"
@@ -446,7 +493,7 @@ echo "Используйте: source ~/add-linters-to-path.sh"
 echo ""
 echo -e "${YELLOW}Примеры использования:${NC}"
 echo "ESLint (JavaScript): eslint file.js"
-echo "Stylelint (CSS): stylelint file.css" 
+echo "Stylelint (CSS): stylelint file.css"
 echo "HTMLHint (HTML): htmlhint file.html"
 echo "PHP Code Sniffer: phpcs file.php"
 echo "PHP-CS-Fixer: php-cs-fixer fix file.php"

@@ -1,8 +1,9 @@
 {
-  "editor.codeActionsOnSave": {
-    "source.fixAll.eslint": "explicit",
-    "source.fixAll.stylelint": "explicit"
-  },
+  "window.commandCenter": true,
+  "cursor.composer.shouldChimeAfterChatFinishes": true,
+  "editor.renderWhitespace": "all",
+  "files.trimTrailingWhitespace": true,
+  "diffEditor.ignoreTrimWhitespace": false,
   // ESLint для JavaScript
   "eslint.enable": true,
   "eslint.run": "onType",
@@ -17,8 +18,9 @@
     "typescriptreact",
     "vue"
   ],
-  "eslint.workingDirectories": ["."],
-
+  "eslint.workingDirectories": [
+    "."
+  ],
   // Stylelint для CSS
   "stylelint.enable": true,
   "stylelint.configFile": "~/.stylelintrc.json",
@@ -28,7 +30,6 @@
     "less",
     "postcss"
   ],
-
   // PHP Code Sniffer
   "phpcs.enable": true,
   "phpcs.standard": "PSR12",
@@ -41,17 +42,6 @@
   ],
   "phpcs.showWarnings": true,
   "phpcs.showSources": true,
-
-  // PHPStan
-  "phpstan.enable": true,
-  "phpstan.level": 5,
-  "phpstan.configFile": "~/.phpstan.neon",
-  "phpstan.workspaceRoot": null,
-
-  // Psalm
-  "psalm.enable": true,
-  "psalm.configFile": "~/psalm.xml",
-
   // Общие настройки линтинга
   "editor.codeActionsOnSave": {
     "source.fixAll.eslint": "explicit",
@@ -60,7 +50,6 @@
   "editor.formatOnSave": true,
   "editor.formatOnPaste": false,
   "editor.formatOnType": false,
-
   // Оптимизация производительности
   "files.watcherExclude": {
     "**/node_modules/**": true,
@@ -87,10 +76,99 @@
     "**/cache": true
   },
   "editor.minimap.enabled": false,
-  "editor.occurrencesHighlight": false,
   "editor.renderLineHighlight": "none",
   "editor.suggest.snippetsPreventQuickSuggestions": false,
   "editor.inlineSuggest.enabled": true,
   "typescript.suggest.autoImports": true,
-  "javascript.suggest.autoImports": true
+  "javascript.suggest.autoImports": true,
+  "phpsab.executablePathCBF": "[HOME]/.config/composer/vendor/bin/phpcbf",
+  "phpsab.executablePathCS": "[HOME]/.config/composer/vendor/bin/phpcs",
+  "phpsab.snifferShowSources": true,
+  "phpsab.standard": "[HOME]/phpcs-rules/MyStandard/ruleset.xml",
+  "phpsab.composerJsonPath": "composer.json",
+  "phpsab.debug": true,
+  "phpsab.autoRulesetSearch": false,
+  "phpsab.fixerEnable": false,
+  "[php]": {
+    "editor.defaultFormatter": "valeryanm.vscode-phpsab"
+  },
+  "php-cs-fixer.executablePath": "~/.config/composer/php-cs-fixer",
+  "php-cs-fixer.executablePathWindows": "", //eg: php-cs-fixer.bat
+  "php-cs-fixer.onsave": false,
+  "php-cs-fixer.rules": "@PSR12",
+  "php-cs-fixer.config": "~/.php-cs-fixer.dist.php",
+  "php-cs-fixer.allowRisky": true,
+  "php-cs-fixer.pathMode": "override",
+  "php-cs-fixer.ignorePHPVersion": false,
+  "php-cs-fixer.exclude": [],
+  "php-cs-fixer.autoFixByBracket": false,
+  "php-cs-fixer.autoFixBySemicolon": false,
+  "php-cs-fixer.formatHtml": false,
+  "php-cs-fixer.documentFormattingProvider": true,
+  "better-comments.multilineComments": true,
+  "better-comments.highlightPlainText": true,
+  "better-comments.tags": [
+    {
+      "tag": "!",
+      "color": "#FF2D00",
+      "strikethrough": false,
+      "underline": false,
+      "backgroundColor": "transparent",
+      "bold": false,
+      "italic": false
+    },
+    {
+      "tag": "?",
+      "color": "#3498DB",
+      "strikethrough": false,
+      "underline": false,
+      "backgroundColor": "transparent",
+      "bold": false,
+      "italic": false
+    },
+    {
+      "tag": "//",
+      "color": "#474747",
+      "strikethrough": true,
+      "underline": false,
+      "backgroundColor": "transparent",
+      "bold": false,
+      "italic": false
+    },
+    {
+      "tag": "todo",
+      "color": "#FF8C00",
+      "strikethrough": false,
+      "underline": false,
+      "backgroundColor": "transparent",
+      "bold": false,
+      "italic": false
+    },
+    {
+      "tag": "*",
+      "color": "#98C379",
+      "strikethrough": false,
+      "underline": false,
+      "backgroundColor": "transparent",
+      "bold": false,
+      "italic": false
+    }
+  ],
+  "namespaceResolver.exclude": "**/node_modules/**", // Exclude glob pattern while finding files
+  "namespaceResolver.showMessageOnStatusBar": false, // Show message on status bar instead of notification box
+  "namespaceResolver.autoSort": true, // Auto sort after imports
+  "namespaceResolver.sortOnSave": false, // Auto sort when a file is saved
+  "namespaceResolver.sortAlphabetically": false, // Sort imports in alphabetical order instead of line length
+  "namespaceResolver.sortNatural": false, // Sort imports using a 'natural order' algorithm
+  "namespaceResolver.leadingSeparator": true, // Expand class with leading namespace separator
+  "namespaceResolver.highlightOnSave": false, // Auto highlight not imported and not used when a file is saved
+  "namespaceResolver.highlightOnOpen": false, // Auto highlight not imported and not used when a file is opened
+  "intelephense.environment.includePaths": [
+    "vendor/**"
+  ],
+  "intelephense.files.exclude": [
+    "**/vendor/**/{test,doc,TEST,DOC}",
+    "**/vendor/**/test/**",
+    "**/vendor/**/tests/**"
+  ]
 }

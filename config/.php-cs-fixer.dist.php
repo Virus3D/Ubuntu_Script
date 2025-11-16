@@ -12,7 +12,7 @@ return (new PhpCsFixer\Config())
         '@Symfony:risky' => true,
         '@DoctrineAnnotation' => true,
 
-        'header_comment' => ['header' => "@see https://npowest.ru\n\n@license Shareware\n@copyright (c) 2019-2024 NPOWest", 'comment_type' => 'PHPDoc', 'location' => 'after_open', 'separate' => 'both'],
+        // 'header_comment' => ['header' => "@see https://npowest.ru\n\n@license Shareware\n@copyright (c) 2019-2024 NPOWest", 'comment_type' => 'PHPDoc', 'location' => 'after_open', 'separate' => 'both'],
 
         /** Alias */
 

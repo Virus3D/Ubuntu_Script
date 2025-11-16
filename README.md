@@ -1,13 +1,34 @@
 # Ubuntu_Script
-Скрипты для развертывания
 
+Скрипты для развертывания
 
 ## Yandex repository
 
-``` shell
+```shell
 sudo wget -O /etc/apt/trusted.gpg.d/yandex-browser.asc https://repo.yandex.ru/yandex-browser/YANDEX-BROWSER-KEY.GPG
 ```
 
-``` shell
+```shell
  echo "deb [arch=amd64] http://repo.yandex.ru/yandex-browser/deb stable main" | sudo tee /etc/apt/sources.list.d/yandex-stable.list
+```
+
+## Установка линтеров
+
+* ESLint
+* Stylelint
+* HTMLHint
+* PHPMD
+* Psalm
+* PHPStan
+* PHP CS
+* PHP cs Fix
+
+```shell
+./deploy-linter.sh
+```
+
+## Обновление настроек Cursor
+
+```shell
+./update-cursor-settings.sh
 ```
