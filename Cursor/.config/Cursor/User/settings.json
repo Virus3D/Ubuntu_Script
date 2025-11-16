@@ -52,14 +52,16 @@
   "editor.formatOnType": false,
   // Оптимизация производительности
   "files.watcherExclude": {
-    "**/node_modules/**": true,
-    "**/vendor/**": true,
-    "**/storage/**": true,
+    "**/*.min.css": true,
+    "**/*.min.js": true,
+    "**/build/**": true,
     "**/cache/**": true,
     "**/dist/**": true,
-    "**/build/**": true,
-    "**/*.min.js": true,
-    "**/*.min.css": true
+    "**/node_modules/**": true,
+    "**/storage/**": true,
+    "**/vendor/**/{test,doc,TEST,DOC}": true,
+    "**/vendor/**/test/**": true,
+    "**/vendor/**/tests/**": true
   },
   "search.exclude": {
     "**/node_modules": true,
@@ -71,7 +73,7 @@
   },
   "files.exclude": {
     "**/node_modules": true,
-    "**/vendor": true,
+    // "**/vendor": true,
     "**/storage": true,
     "**/cache": true
   },
@@ -88,15 +90,18 @@
   "phpsab.composerJsonPath": "composer.json",
   "phpsab.debug": true,
   "phpsab.autoRulesetSearch": false,
-  "phpsab.fixerEnable": false,
   "[php]": {
-    "editor.defaultFormatter": "valeryanm.vscode-phpsab"
+    "editor.defaultFormatter": "valeryanm.vscode-phpsab",
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+      "source.fixAll.intelephense": "explicit"
+    }
   },
-  "php-cs-fixer.executablePath": "~/.config/composer/php-cs-fixer",
+  "php-cs-fixer.executablePath": "~/.config/composer/vendor/bin/php-cs-fixer",
   "php-cs-fixer.executablePathWindows": "", //eg: php-cs-fixer.bat
   "php-cs-fixer.onsave": false,
   "php-cs-fixer.rules": "@PSR12",
-  "php-cs-fixer.config": "~/.php-cs-fixer.dist.php",
+  "php-cs-fixer.config": "./.php-cs-fixer.dist.php",
   "php-cs-fixer.allowRisky": true,
   "php-cs-fixer.pathMode": "override",
   "php-cs-fixer.ignorePHPVersion": false,
@@ -163,12 +168,57 @@
   "namespaceResolver.leadingSeparator": true, // Expand class with leading namespace separator
   "namespaceResolver.highlightOnSave": false, // Auto highlight not imported and not used when a file is saved
   "namespaceResolver.highlightOnOpen": false, // Auto highlight not imported and not used when a file is opened
-  "intelephense.environment.includePaths": [
-    "vendor/**"
-  ],
+  // Основные настройки Intelephense
+  "intelephense.environment.shortOpenTag": false,
+  // Автодополнение
+  "intelephense.completion.insertUseDeclaration": true,
+  "intelephense.completion.triggerParameterHints": true,
+  "intelephense.completion.fullyQualifyGlobalConstantsAndFunctions": false,
+  "intelephense.completion.maxItems": 100,
+  // Диагностика
+  "intelephense.diagnostics.run": "onType",
+  "intelephense.diagnostics.undefinedTypes": true,
+  "intelephense.diagnostics.undefinedFunctions": true,
+  "intelephense.diagnostics.undefinedConstants": true,
+  "intelephense.diagnostics.undefinedClassConstants": true,
+  "intelephense.diagnostics.undefinedMethods": true,
+  "intelephense.diagnostics.undefinedProperties": true,
+  "intelephense.diagnostics.undefinedVariables": true,
+  "intelephense.diagnostics.undefinedSymbols": true,
+  "intelephense.diagnostics.deprecated": true,
+  "intelephense.diagnostics.undefinedDocClasses": true,
+  // Исключения файлов (оптимизировано для производительности)
   "intelephense.files.exclude": [
-    "**/vendor/**/{test,doc,TEST,DOC}",
-    "**/vendor/**/test/**",
-    "**/vendor/**/tests/**"
-  ]
+    "**/vendor/**/{test,doc,TEST,DOC,Example,example}",
+    "**/vendor/**/{Tests,tests,Test,test}/**",
+    "**/vendor/**/vendor/**",
+    "**/var/cache/**",
+    "**/var/log/**",
+    "**/node_modules/**",
+    "**/.git/**",
+    "**/*.min.js",
+    "**/*.min.css"
+  ],
+  // Производительность
+  "intelephense.files.maxSize": 4000000,
+  "intelephense.trace.server": "off",
+  "intelephense.memoryLimit": 4096,
+  // CodeLens
+  "intelephense.codeLens.implementations.enable": true,
+  "intelephense.codeLens.overrides.enable": true,
+  "intelephense.codeLens.parent.enable": true,
+  "intelephense.codeLens.references.enable": true,
+  "intelephense.codeLens.usages.enable": true,
+  // Форматирование
+  "intelephense.format.enable": true,
+  "intelephense.format.keywordCase": "lower",
+  // Настройки для Symfony
+  "intelephense.environment.includePaths": [
+    "./vendor",
+    "./bundles"
+  ],
+  "intelephense.compatibility.preferPsalmPhpstanPrefixedAnnotations": true,
+  "files.associations": {
+    "*.twig": "html"
+  },
 }
