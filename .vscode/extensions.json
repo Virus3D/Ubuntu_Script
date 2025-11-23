@@ -13,6 +13,8 @@
         "aaron-bond.better-comments",
         "sleistner.vscode-fileutils",
         "gruntfuggly.todo-tree",
-        "bierner.markdown-preview-github-styles"
+        "bierner.markdown-preview-github-styles",
+        "cerzat43.twigcs",
+        "htmlhint.vscode-htmlhint"
     ]
 }

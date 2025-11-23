@@ -234,6 +234,11 @@ EOF
     echo -e "${GREEN}Базовый конфиг PHPStan создан!${NC}"
 fi
 
+# Копируем конфиг TwigCS
+copy_config_file "TwigCS" \
+    "$CONFIG_DIR/.twigcs.json" \
+    ~/.twigcs.json
+
 echo -e "${GREEN}Установка завершена!${NC}"
 echo ""
 
@@ -248,6 +253,7 @@ configs=(
     ".phpstan.neon"
     ".php-cs-fixer.dist.php"
     "psalm.xml"
+    ".twigcs.json"
 )
 
 for config in "${configs[@]}"; do

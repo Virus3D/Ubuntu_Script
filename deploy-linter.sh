@@ -149,6 +149,9 @@ install_composer_global "shipmonk/phpstan-rules"
 install_composer_global "shipmonk/dead-code-detector"
 install_composer_global "staabm/phpstan-todo-by"
 
+# TwigCS
+install_composer_global "friendsoftwig/twigcs"
+
 # Копируем дополнительные конфиги
 echo -e "${YELLOW}Копируем дополнительные конфиги...${NC}"
 

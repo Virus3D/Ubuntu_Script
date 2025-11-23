@@ -15,12 +15,10 @@ error() {
     echo -e "${RED}[Ошибка] $1${NC}" >&2
     return 1
 }
-
 critical_error() {
     echo -e "${RED}[Критическая ошибка] $1${NC}" >&2
     exit 1
 }
-
 info() { echo -e "${GREEN}[Инфо] $1${NC}"; }
 warn() { echo -e "${YELLOW}[Предупреждение] $1${NC}"; }
 debug() { echo -e "${BLUE}[Отладка] $1${NC}"; }
@@ -34,6 +32,13 @@ ERROR_OCCURRED=0
 ERROR_MESSAGES=()
 CURRENT_STEP=""
 SKIP_STEP=0
+
+# Определение владельца файлов в зависимости от окружения
+if [ "$environment" = "dev" ]; then
+    FILE_OWNER="$SUDO_USER:www-data"
+else
+    FILE_OWNER="www-data:www-data"
+fi
 
 # Функции обработки ошибок
 set_current_step() {
@@ -128,6 +133,9 @@ safe_mkdir() {
     local step_name="${2:-Создание директории $dir}"
 
     safe_execute "mkdir -p '$dir'" "$step_name" 0
+    if [ $? -eq 0 ] && [ $SKIP_STEP -eq 0 ]; then
+        safe_execute "chown -R $FILE_OWNER '$dir'" "Настройка прав для $dir" 0
+    fi
 }
 
 safe_chown() {
@@ -250,7 +258,7 @@ check_existing_domain() {
     local exclude_project="$2"
 
     if [ -f "/etc/nginx/sites-available/$project_name" ] || [ -f "/etc/nginx/sites-enabled/$project_name" ]; then
-        if [ "$project_name" != "$exclude_project" ]; then
+        if [ "$mode" != "rebuild" ] || [ "$project_name" != "$exclude_project" ]; then
             warn "Конфигурация Nginx для проекта $project_name уже существует"
             # Предлагаем варианты действий
             echo ""
@@ -305,7 +313,7 @@ check_existing_domain() {
 
     # Проверка существования домена в конфигах nginx
     if grep -r "server_name.*$domain" /etc/nginx/sites-available/ >/dev/null 2>&1; then
-        if [ "$project_name" != "$exclude_project" ]; then
+        if [ "$mode" != "rebuild" ] || [ "$project_name" != "$exclude_project" ]; then
             error "Домен $domain уже используется в другой конфигурации Nginx"
             return 1
         fi
@@ -390,227 +398,167 @@ check_bitrix_requirements() {
     fi
 }
 
-# Функция для создания .env файлов с поддержкой .env.local
-setup_env_files() {
+# Функция для сохранения конфигурации проекта
+save_project_config() {
     local project_dir="$1"
-    local project_type="$2"
-    local environment="$3"
-    local db_name="$4"
-    local db_user="$5"
-    local db_pass="$6"
+    local config_file="$project_dir/.deploy-config"
 
-    step "Настройка environment файлов..."
-
-    case "$project_type" in
-        laravel)
-            # Для Laravel используем .env и .env.local
-            local env_file="$project_dir/.env"
-            local env_local_file="$project_dir/.env.local"
-
-            # Создаем основной .env файл если его нет
-            if [ ! -f "$env_file" ]; then
-                if [ -f "$project_dir/.env.example" ]; then
-                    safe_execute "cp '$project_dir/.env.example' '$env_file'" "Копирование .env.example" 0
-                else
-                    safe_execute "cat > '$env_file' << 'EOF'
-APP_NAME=\"$project_name\"
-APP_ENV=$environment
-APP_KEY=
-APP_DEBUG=$([ \"$environment\" = \"dev\" ] && echo \"true\" || echo \"false\")
-APP_URL=http://$domain
-
-LOG_CHANNEL=stack
-LOG_LEVEL=debug
-
-DB_CONNECTION=mysql
-DB_HOST=127.0.0.1
-DB_PORT=3306
-DB_DATABASE=$db_name
-DB_USERNAME=$db_user
-DB_PASSWORD=$db_pass
-
-BROADCAST_DRIVER=log
-CACHE_DRIVER=file
-QUEUE_CONNECTION=sync
-SESSION_DRIVER=file
-SESSION_LIFETIME=120
-
-REDIS_HOST=127.0.0.1
-REDIS_PASSWORD=null
-REDIS_PORT=6379
-
-MAIL_MAILER=smtp
-MAIL_HOST=mailhog
-MAIL_PORT=1025
-MAIL_USERNAME=null
-MAIL_PASSWORD=null
-MAIL_ENCRYPTION=null
-MAIL_FROM_ADDRESS=null
-MAIL_FROM_NAME=\"\\\${APP_NAME}\"
-EOF" "Создание .env файла для Laravel" 0
-                fi
-            fi
-
-            # Создаем .env.local для локальных переопределений (только для dev)
-            if [ "$environment" = "dev" ] && [ ! -f "$env_local_file" ]; then
-                safe_execute "cat > '$env_local_file' << 'EOF'
-# Локальные переопределения для разработки
-APP_DEBUG=true
-APP_ENV=local
-
-# База данных для разработки
-DB_HOST=localhost
-DB_DATABASE=${db_name}_dev
-DB_USERNAME=root
-DB_PASSWORD=
-
-# Отладочные настройки
-LOG_LEVEL=debug
-DEBUGBAR_ENABLED=true
-
-# Настройки для разработки
-CACHE_DRIVER=array
-SESSION_DRIVER=array
-QUEUE_DRIVER=sync
-
-# Отключение оптимизации для разработки
-OPCACHE_ENABLE=0
-EOF" "Создание .env.local для разработки" 0
-
-                if [ $? -eq 0 ]; then
-                    info "Создан .env.local для локальных настроек разработки"
-                fi
-            fi
-
-            # Генерируем ключ приложения если его нет
-            if [ -f "$env_file" ] && ! grep -q "APP_KEY=base64:" "$env_file"; then
-                safe_execute "cd '$project_dir' && sudo -u www-data /usr/bin/php artisan key:generate" "Генерация ключа приложения Laravel" 0
-            fi
-            ;;
-
-        symfony)
-            # Для Symfony используем .env.local и .env
-            local env_file="$project_dir/.env"
-            local env_local_file="$project_dir/.env.local"
-
-            # Создаем .env.local (основной файл для Symfony)
-            if [ ! -f "$env_local_file" ]; then
-                if [ -f "$project_dir/.env" ]; then
-                    safe_execute "cp '$project_dir/.env' '$env_local_file'" "Копирование .env в .env.local" 0
-                elif [ -f "$project_dir/.env.example" ]; then
-                    safe_execute "cp '$project_dir/.env.example' '$env_local_file'" "Копирование .env.example в .env.local" 0
-                elif [ -f "$project_dir/.env.dist" ]; then
-                    safe_execute "cp '$project_dir/.env.dist' '$env_local_file'" "Копирование .env.dist в .env.local" 0
-                else
-                    # Создаем базовый .env.local
-                    safe_execute "cat > '$env_local_file' << 'EOF'
-# .env.local
-APP_ENV=$environment
-APP_DEBUG=$([ \"$environment\" = \"dev\" ] && echo \"1\" || echo \"0\")
-APP_SECRET=$(openssl rand -base64 32)
-
-# Database configuration
-DATABASE_URL=\"mysql://$db_user:$db_pass@127.0.0.1:3306/$db_name?serverVersion=8.0&charset=utf8mb4\"
-
-# Mailer configuration
-MAILER_DSN=null://localhost
-EOF" "Создание .env.local для Symfony" 0
-                fi
-
-                if [ $? -eq 0 ]; then
-                    info "Создан .env.local для Symfony"
-
-                    # Для продакшена создаем также .env.prod.local
-                    if [ "$environment" = "prod" ] && [ ! -f "$project_dir/.env.prod.local" ]; then
-                        safe_execute "cp '$env_local_file' '$project_dir/.env.prod.local'" "Создание .env.prod.local" 0
-                    fi
-                fi
-            fi
-
-            # Создаем базовый .env если его нет
-            if [ ! -f "$env_file" ]; then
-                safe_execute "cat > '$env_file' << 'EOF'
-# This file is a template for the .env.local file
-# Copy this file to .env.local and modify the values for your environment
-
-APP_ENV=dev
-APP_SECRET=change_this_secret
-DATABASE_URL=\"mysql://db_user:db_password@127.0.0.1:3306/db_name\"
-EOF" "Создание базового .env" 0
-            fi
-
-            # Генерируем секреты для Symfony
-            if [ -f "$env_local_file" ]; then
-                safe_execute "cd '$project_dir' && sudo -u www-data /usr/bin/php bin/console secrets:generate-keys --env=$environment" "Генерация секретов Symfony" 0
-            fi
-            ;;
-
-        nodejs)
-            # Для Node.js используем .env и .env.local
-            local env_file="$project_dir/.env"
-            local env_local_file="$project_dir/.env.local"
-
-            # Создаем основной .env
-            if [ ! -f "$env_file" ]; then
-                safe_execute "cat > '$env_file' << 'EOF'
-NODE_ENV=$environment
-PORT=3000
-HOST=0.0.0.0
-
-# Database
-DB_HOST=localhost
-DB_PORT=3306
+    safe_execute "cat > '$config_file' << EOF
+# Конфигурация проекта $project_name
+PROJECT_NAME=$project_name
+DOMAIN=$domain
+PROJECT_TYPE=$project_type
+ENVIRONMENT=$environment
+PHP_VERSION=$php_version
+FPM_POOL_NAME=$fpm_pool_name
 DB_NAME=$db_name
 DB_USER=$db_user
-DB_PASS=$db_pass
+CREATED_AT=\$(date +\"%Y-%m-%d %H:%M:%S\")
+UPDATED_AT=\$(date +\"%Y-%m-%d %H:%M:%S\")
+INSTALLATION_STATUS=$([ \$ERROR_OCCURRED -eq 0 ] && echo "COMPLETED" || echo "PARTIAL")
+ERRORS=${#ERROR_MESSAGES[@]}
+EOF" "Сохранение конфигурации проекта" 0
 
-# Application
-APP_URL=http://$domain
-API_URL=http://$domain/api
-
-# Security
-JWT_SECRET=$(openssl rand -base64 64)
-SESSION_SECRET=$(openssl rand -base64 32)
-EOF" "Создание .env для Node.js" 0
-            fi
-
-            # Создаем .env.local для разработки
-            if [ "$environment" = "dev" ] && [ ! -f "$env_local_file" ]; then
-                safe_execute "cat > '$env_local_file' << 'EOF'
-# Локальные настройки для разработки
-NODE_ENV=development
-DEBUG=app:*,api:*
-
-# База данных для разработки
-DB_HOST=localhost
-DB_PORT=3306
-DB_NAME=${db_name}_dev
-DB_USER=root
-DB_PASS=
-
-# Dev server settings
-HOST=localhost
-PORT=3001
-
-# Development features
-ENABLE_SWAGGER=true
-ENABLE_GRAPHQL=true
-LOG_LEVEL=debug
-EOF" "Создание .env.local для Node.js" 0
-
-                if [ $? -eq 0 ]; then
-                    info "Создан .env.local для разработки Node.js"
-                fi
-            fi
-            ;;
-    esac
-
-    # Добавляем .env.local в .gitignore если его там нет
-    local gitignore_file="$project_dir/.gitignore"
-    if [ -f "$gitignore_file" ] && ! grep -q ".env.local" "$gitignore_file"; then
-        echo ".env.local" >> "$gitignore_file"
-        info "Добавлен .env.local в .gitignore"
+    if [ $? -eq 0 ]; then
+        safe_chmod "$config_file" "600"
+        safe_chown "$config_file"
     fi
+}
+
+# Функция для загрузки конфигурации проекта
+load_project_config() {
+    local project_dir="$1"
+    local config_file="$project_dir/.deploy-config"
+
+    if [ -f "$config_file" ]; then
+        source "$config_file"
+        info "Загружена конфигурация проекта из $config_file"
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Функция пересборки проекта
+rebuild_project() {
+    rebuild_info "=== ПЕРЕСБИЛД ПРОЕКТА ==="
+
+    # Поиск проектов в /var/www
+    local projects=()
+    for dir in /var/www/*; do
+        if [ -d "$dir" ] && [ -f "$dir/.deploy-config" ]; then
+            projects+=("$(basename "$dir")")
+        fi
+    done
+
+    if [ ${#projects[@]} -eq 0 ]; then
+        critical_error "Не найдено проектов с конфигурацией для пересборки"
+    fi
+
+    echo "Доступные проекты:"
+    for i in "${!projects[@]}"; do
+        echo "  $((i+1))) ${projects[$i]}"
+    done
+
+    read -p "Выберите проект для пересборки (1-${#projects[@]}): " project_choice
+    local selected_project="${projects[$((project_choice-1))]}"
+
+    if [ -z "$selected_project" ]; then
+        critical_error "Неверный выбор проекта"
+    fi
+
+    local project_dir="/var/www/$selected_project"
+    if ! load_project_config "$project_dir"; then
+        critical_error "Не удалось загрузить конфигурацию проекта"
+    fi
+
+    rebuild_info "Пересборка проекта: $selected_project"
+    echo "Текущая конфигурация:"
+    echo "  Домен: $DOMAIN"
+    echo "  Тип: $PROJECT_TYPE"
+    echo "  Окружение: $ENVIRONMENT"
+    echo "  PHP: $PHP_VERSION"
+
+    # Предлагаем изменить параметры
+    read -p "Изменить конфигурацию? (y/n): " change_config
+    if [ "$change_config" = "y" ]; then
+        # Сохраняем старые значения для подсказок
+        local old_domain="$DOMAIN"
+        local old_environment="$ENVIRONMENT"
+        local old_php_version="$PHP_VERSION"
+
+        # Запрашиваем новые значения
+        read -p "Домен [$old_domain]: " new_domain
+        domain="${new_domain:-$old_domain}"
+        if ! validate_domain "$domain"; then
+            critical_error "Некорректный домен"
+        fi
+        if ! check_existing_domain "$domain" "$selected_project"; then
+            critical_error "Домен уже используется"
+        fi
+
+        read -p "Окружение (dev/prod) [$old_environment]: " new_environment
+        environment="${new_environment:-$old_environment}"
+        if ! validate_environment "$environment"; then
+            critical_error "Некорректное окружение"
+        fi
+
+        if [[ "$PROJECT_TYPE" == "php" || "$PROJECT_TYPE" == "laravel" || "$PROJECT_TYPE" == "symfony" || "$PROJECT_TYPE" == "bitrix" ]]; then
+            read -p "Версия PHP [$old_php_version]: " new_php_version
+            php_version="${new_php_version:-$old_php_version}"
+            if ! validate_php_version "$php_version" "$PROJECT_TYPE"; then
+                critical_error "Некорректная версия PHP"
+            fi
+        fi
+
+        # Обновляем переменные
+        project_name="$selected_project"
+        project_type="$PROJECT_TYPE"
+        fpm_pool_name="$FPM_POOL_NAME"
+
+        rebuild_info "Новая конфигурация:"
+        echo "  Домен: $domain"
+        echo "  Окружение: $environment"
+        echo "  PHP: $php_version"
+    else
+        # Используем существующие значения
+        project_name="$selected_project"
+        domain="$DOMAIN"
+        project_type="$PROJECT_TYPE"
+        environment="$ENVIRONMENT"
+        php_version="$PHP_VERSION"
+        fpm_pool_name="$FPM_POOL_NAME"
+        db_name="$DB_NAME"
+        db_user="$DB_USER"
+    fi
+
+    # Удаляем старые конфиги
+    rebuild_info "Удаление старых конфигураций..."
+
+    # Удаляем конфиг nginx
+    if [ -f "/etc/nginx/sites-available/$project_name" ]; then
+        safe_execute "rm -f '/etc/nginx/sites-available/$project_name'" "Удаление старого конфига nginx" 0
+    fi
+
+    if [ -f "/etc/nginx/sites-enabled/$project_name" ]; then
+        safe_execute "rm -f '/etc/nginx/sites-enabled/$project_name'" "Удаление ссылки nginx" 0
+    fi
+
+    # Удаляем старый PHP-FPM пул
+    if [ -n "$php_version" ] && [ -f "/etc/php/$php_version/fpm/pool.d/$fpm_pool_name.conf" ]; then
+        safe_execute "rm -f '/etc/php/$php_version/fpm/pool.d/$fpm_pool_name.conf'" "Удаление старого PHP-FPM пула" 0
+    fi
+
+    # Перезагружаем службы
+    safe_systemctl "reload" "nginx"
+    if [ -n "$php_version" ]; then
+        safe_systemctl "reload" "php$php_version-fpm"
+    fi
+
+    rebuild_info "Старые конфигурации удалены"
+
+    # Устанавливаем режим пересборки
+    mode="rebuild"
 }
 
 # Улучшенная функция настройки прав доступа
@@ -622,22 +570,19 @@ setup_permissions() {
 
     step "Настройка прав доступа для окружения $environment..."
 
-    # Определение владельца файлов в зависимости от окружения
-    if [ "$environment" = "dev" ]; then
-        FILE_OWNER="$CURRENT_USER:www-data"
-    else
-        FILE_OWNER="www-data:www-data"
-    fi
-
-    safe_execute "chown -R $FILE_OWNER '$project_dir'" "Установка владельца" 0
-
-    # Базовые права для всех проектов
     if [ "$environment" = "dev" ]; then
         info "РЕЖИМ РАЗРАБОТКИ: Настройка прав для пользователя $CURRENT_USER"
+
+        # В разработке даем полные права текущему пользователю
+        safe_execute "chown -R $FILE_OWNER '$project_dir'" "Установка владельца для разработки" 0
 
         # Базовые права: файлы 664, директории 775
         safe_execute "find '$project_dir' -type f -exec chmod 664 {} \;" "Права 664 на файлы" 0
         safe_execute "find '$project_dir' -type d -exec chmod 775 {} \;" "Права 775 на директории" 0
+
+        # Особые права для исполняемых файлов
+        safe_execute "find '$project_dir' -name '*.sh' -type f -exec chmod 755 {} \;" "Права на скрипты" 0
+        safe_execute "find '$project_dir' -name '*.php' -type f -exec chmod 644 {} \;" "Права на PHP файлы" 0
 
     else
         info "РЕЖИМ ПРОДАКШЕНА: Строгие права для безопасности"
@@ -666,6 +611,7 @@ setup_permissions() {
             for dir in "${writable_dirs[@]}"; do
                 if [ -d "$project_dir/$dir" ]; then
                     safe_chmod "$project_dir/$dir" "775" "Права для $dir"
+                    safe_chown "$project_dir/$dir" "Владелец для $dir"
                 fi
             done
 
@@ -688,6 +634,7 @@ setup_permissions() {
             for dir in "${writable_dirs[@]}"; do
                 if [ -d "$project_dir/$dir" ]; then
                     safe_chmod "$project_dir/$dir" "775" "Права для $dir"
+                    safe_chown "$project_dir/$dir" "Владелец для $dir"
                 fi
             done
 
@@ -714,70 +661,104 @@ setup_permissions() {
             for dir in "${writable_dirs[@]}"; do
                 if [ -d "$project_dir/$dir" ]; then
                     safe_chmod "$project_dir/$dir" "775" "Права для $dir"
+                    safe_chown "$project_dir/$dir" "Владелец для $dir"
+
+                    # Рекурсивно для содержимого
+                    safe_execute "find '$project_dir/$dir' -type f -exec chmod 664 {} \;" "Права файлов в $dir" 0
+                    safe_execute "find '$project_dir/$dir' -type d -exec chmod 775 {} \;" "Права поддиректорий в $dir" 0
+                fi
+            done
+
+            # Особые файлы Bitrix
+            local bitrix_files=(
+                "bitrix/php_interface/dbconn.php"
+                "bitrix/php_interface/after_connect_d7.php"
+                "bitrix/.settings.php"
+                ".settings.php"
+            )
+
+            for file in "${bitrix_files[@]}"; do
+                if [ -f "$project_dir/$file" ]; then
+                    safe_chmod "$project_dir/$file" "664" "Права для $file"
+                    safe_chown "$project_dir/$file" "Владелец для $file"
                 fi
             done
             ;;
+
+        nodejs)
+            info "Настройка прав для Node.js..."
+
+            # Директории для логирования
+            if [ -d "$project_dir/logs" ]; then
+                safe_chmod "$project_dir/logs" "775" "Права для logs"
+                safe_chown "$project_dir/logs" "Владелец для logs"
+            fi
+
+            # Исполняемые файлы
+            if [ -f "$project_dir/package.json" ]; then
+                # Находим и устанавливаем права на бинарные файлы node_modules
+                if [ -d "$project_dir/node_modules/.bin" ]; then
+                    safe_execute "find '$project_dir/node_modules/.bin' -type f -exec chmod 755 {} \;" "Права на бинарные файлы npm" 0
+                fi
+            fi
+            ;;
     esac
 
-    # Защита конфиденциальных файлов - ВСЕГДА
-    local protected_files=(
-        ".env"
-        ".env.local"
-        ".env.prod"
-        ".env.prod.local"
-        "database_credentials.txt"
-        ".deploy-config"
-    )
+    # Специальные права для окружения разработки
+    if [ "$environment" = "dev" ]; then
+        info "Дополнительные права для разработки..."
 
-    for file in "${protected_files[@]}"; do
-        if [ -f "$project_dir/$file" ]; then
-            if [ "$environment" = "dev" ]; then
-                safe_chmod "$project_dir/$file" "660" "Защита $file"
-            else
-                safe_chmod "$project_dir/$file" "600" "Защита $file"
-            fi
-        fi
-    done
-
-    safe_execute "cd '$project_dir' && chmod +x node_modules/.bin/*" "Установка прав для npm" 0
-    setup_vendor_permissions "$project_dir" "$environment"
-    info "Настройка прав доступа завершена"
-}
-
-# Функция для настройки прав vendor/bin
-setup_vendor_permissions() {
-    local project_dir="$1"
-    local environment="$2"
-
-    step "Настройка прав для vendor/bin..."
-
-    if [ -d "$project_dir/vendor/bin" ]; then
-        info "Настройка прав на исполняемые файлы в vendor/bin..."
-
-        # Даем права на выполнение всем бинарным файлам в vendor/bin
-        safe_execute "find '$project_dir/vendor/bin' -type f -name '*' -exec chmod +x {} \;" "Установка прав на выполнение для vendor/bin" 0
-
-        # Проверяем конкретные проблемы с правами
-        local problematic_files=(
-            "requirements-checker"
-            "symfony"
-            "phpunit"
-            "phpstan"
+        # Разрешаем запись в определенные директории для разработки
+        local dev_writable_dirs=(
+            "logs"
+            "tests"
+            "var"
+            "tmp"
         )
 
-        for file in "${problematic_files[@]}"; do
-            if [ -f "$project_dir/vendor/bin/$file" ]; then
-                safe_execute "chmod +x '$project_dir/vendor/bin/$file'" "Права для $file" 0
-                info "Установлены права для: $file"
+        for dir in "${dev_writable_dirs[@]}"; do
+            if [ -d "$project_dir/$dir" ]; then
+                safe_chmod "$project_dir/$dir" "775" "Права разработки для $dir"
             fi
         done
 
-        # Дополнительная проверка прав
-        debug "Текущие права в vendor/bin:"
-        safe_execute "ls -la '$project_dir/vendor/bin/' | head -10" "Проверка прав vendor/bin" 0
+        # Логируем установленные права для отладки
+        debug "Текущие права в корне проекта:"
+        safe_execute "ls -la '$project_dir' | head -10" "Просмотр прав в корне" 0
     else
-        warn "Директория vendor/bin не найдена"
+        # Продакшен: более строгие права
+        info "Строгие права для продакшена..."
+
+        # Запрещаем выполнение в upload директориях
+        if [ -d "$project_dir/upload" ]; then
+            safe_execute "find '$project_dir/upload' -name '*.php' -type f -exec chmod 644 {} \;" "Запрет выполнения PHP в upload" 0
+        fi
+
+        # Запрещаем доступ к конфигурационным файлам
+        local protected_files=(
+            ".env"
+            ".env.prod"
+            "deploy.sh"
+            "database_credentials.txt"
+        )
+
+        for file in "${protected_files[@]}"; do
+            if [ -f "$project_dir/$file" ]; then
+                safe_chmod "$project_dir/$file" "600" "Защита $file"
+            fi
+        done
     fi
+
+    # Права для веб-сервера на запись в сессиях PHP
+    if is_php; then
+        local session_path=$(php$php_version -r "echo ini_get('session.save_path');" 2>/dev/null || echo "/var/lib/php/sessions")
+        if [ -d "$session_path" ]; then
+            safe_chmod "$session_path" "1733" "Права на директорию сессий PHP"
+            info "Настроены права на директорию сессий: $session_path"
+        fi
+    fi
+
+    info "Настройка прав доступа завершена"
 }
 
 setup_git_workflow() {
@@ -1084,6 +1065,7 @@ setup_ssl() {
 }
 
 # Функция для установки npm зависимостей и запуска скриптов
+# Улучшенная функция для установки npm зависимостей
 setup_npm_dependencies() {
     local project_dir="$1"
     local project_type="$2"
@@ -1099,8 +1081,15 @@ setup_npm_dependencies() {
 
     # В режиме разработки устанавливаем зависимости от текущего пользователя
     if [ "$environment" = "dev" ]; then
-        info "Режим разработки: установка npm от пользователя $CURRENT_USER"
+        NPM_USER="$CURRENT_USER"
+        info "Режим разработки: установка npm от пользователя $NPM_USER"
 
+        # Даем пользователю полные права на проект для установки зависимостей
+        safe_execute "chown -R $CURRENT_USER:www-data '$project_dir'" "Владелец для установки npm" 0
+        safe_execute "chmod -R 775 '$project_dir'" "Права для установки npm" 0
+
+        # Устанавливаем зависимости БЕЗ sudo - от имени текущего пользователя
+        info "Установка npm зависимостей (может занять время)..."
         cd "$project_dir"
 
         # Проверяем, есть ли уже node_modules
@@ -1109,24 +1098,43 @@ setup_npm_dependencies() {
             if npm install; then
                 npm_info "NPM зависимости успешно обновлены"
             else
-                warn "Ошибка при обновлении npm зависимостей"
-                return 1
+                warn "Ошибка при обновлении npm зависимостей, пробуем очистить и установить заново..."
+                rm -rf node_modules
+                npm install
             fi
         else
             info "Первоначальная установка npm зависимостей..."
             npm install
         fi
 
+        # Проверяем успешность установки
+        if [ $? -eq 0 ]; then
+            npm_info "NPM зависимости успешно установлены"
+
+            # Убеждаемся, что все бинарные файлы исполняемые
+            if [ -d "node_modules/.bin" ]; then
+                chmod -R +x node_modules/.bin/
+                npm_info "Права на бинарные файлы npm установлены"
+            fi
+        else
+            warn "Ошибка при установке npm зависимостей"
+            return 1
+        fi
+
+        # Возвращаемся в исходную директорию
         cd - > /dev/null
 
     else
         # Режим продакшена - используем www-data
-        info "Режим продакшена: установка npm от пользователя www-data"
+        NPM_USER="www-data"
+        info "Режим продакшена: установка npm от пользователя $NPM_USER"
+
+        safe_execute "chown -R www-data:www-data '$project_dir'" "Владелец для установки npm" 0
+        safe_execute "chmod -R 755 '$project_dir'" "Права для установки npm" 0
         safe_execute "cd '$project_dir' && sudo -u www-data npm install --unsafe-perm" "Установка npm зависимостей" 0
     fi
 
     if [ $? -eq 0 ]; then
-        safe_execute "cd '$project_dir' && chmod +x node_modules/.bin/*" "Установка прав для npm" 0
         # Запускаем npm скрипты в зависимости от окружения
         if [ "$environment" = "dev" ]; then
             info "Запуск npm скриптов в режиме разработки..."
@@ -1135,10 +1143,19 @@ setup_npm_dependencies() {
             # Проверяем наличие скриптов
             if npm run | grep -q " dev "; then
                 info "Запуск: npm run dev"
-                npm run dev || warn "Ошибка при запуске npm run dev"
+                # В режиме разработки запускаем напрямую, без sudo
+                if ! npm run dev; then
+                    warn "Ошибка при запуске npm run dev"
+                    # Пробуем альтернативные варианты
+                    if [ -f "node_modules/.bin/encore" ]; then
+                        info "Пробуем запустить encore напрямую..."
+                        chmod +x node_modules/.bin/encore
+                        ./node_modules/.bin/encore dev
+                    fi
+                fi
             elif npm run | grep -q " build "; then
                 info "Запуск: npm run build"
-                npm run build || warn "Ошибка при запуске npm run build"
+                npm run build
             else
                 info "Скрипты dev или build не найдены в package.json"
             fi
@@ -1152,8 +1169,50 @@ setup_npm_dependencies() {
                 safe_execute "cd '$project_dir' && sudo -u www-data npm run build" "Запуск npm run build" 0
             fi
         fi
+
+        # Восстанавливаем правильные права после всех операций
+        setup_permissions "$project_dir" "$project_type" "$environment" "$php_version"
     else
         warn "Ошибка при установке npm зависимостей"
+        # Все равно восстанавливаем права
+        setup_permissions "$project_dir" "$project_type" "$environment" "$php_version"
+    fi
+}
+
+# Функция диагностики и исправления проблем с npm
+diagnose_and_fix_npm() {
+    local project_dir="$1"
+
+    step "Диагностика проблем с npm..."
+
+    # Проверяем права на node_modules
+    if [ -d "$project_dir/node_modules" ]; then
+        echo "=== ДИАГНОСТИКА NPM ==="
+        echo "Владелец node_modules: $(stat -c '%U:%G' "$project_dir/node_modules")"
+        echo "Права node_modules: $(stat -c '%a' "$project_dir/node_modules")"
+
+        # Проверяем .bin
+        if [ -d "$project_dir/node_modules/.bin" ]; then
+            echo "Владелец .bin: $(stat -c '%U:%G' "$project_dir/node_modules/.bin")"
+            echo "Права .bin: $(stat -c '%a' "$project_dir/node_modules/.bin")"
+
+            # Проверяем encore
+            if [ -f "$project_dir/node_modules/.bin/encore" ]; then
+                echo "Encore права: $(stat -c '%a' "$project_dir/node_modules/.bin/encore")"
+                echo "Encore исполняемый: $([ -x "$project_dir/node_modules/.bin/encore" ] && echo "ДА" || echo "НЕТ")"
+
+                # Исправляем если нужно
+                if [ ! -x "$project_dir/node_modules/.bin/encore" ]; then
+                    warn "Encore не исполняемый, исправляем..."
+                    chmod +x "$project_dir/node_modules/.bin/encore"
+                fi
+            fi
+
+            # Исправляем все бинарные файлы
+            find "$project_dir/node_modules/.bin" -type f -exec chmod +x {} \;
+            info "Права на бинарные файлы исправлены"
+        fi
+        echo "=== КОНЕЦ ДИАГНОСТИКИ ==="
     fi
 }
 
@@ -1171,72 +1230,99 @@ done
 
 # Выбор режима работы
 echo "=== ВЕБ-ПРОЕКТ ДЕПЛОЙ СКРИПТ ==="
+echo "Выберите режим работы:"
+echo "  1) Установка нового проекта"
+echo "  2) Пересборка существующего проекта"
+echo "  3) Обновление конфигурации проекта"
+read -p "Выберите вариант (1-3): " mode_choice
 
-# Ввод данных с валидацией
-while true; do
-    read -p "Введите имя проекта: " project_name
-    if validate_project_name "$project_name"; then
-        break
-    else
-        read -p "Попробовать снова? (Y/n): " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Nn]$ ]]; then
-            critical_error "Установка прервана"
+case "$mode_choice" in
+    1)
+        mode="install"
+        echo "Режим: Установка нового проекта"
+        ;;
+    2)
+        rebuild_project
+        ;;
+    3)
+        mode="update"
+        rebuild_project
+        ;;
+    *)
+        critical_error "Неверный выбор режима"
+        ;;
+esac
+
+# Если не в режиме пересборки, запрашиваем данные для нового проекта
+if [ "$mode" = "install" ]; then
+    echo "=== Настройка нового веб-проекта ==="
+
+    # Ввод данных с валидацией
+    while true; do
+        read -p "Введите имя проекта: " project_name
+        if validate_project_name "$project_name"; then
+            break
+        else
+            read -p "Попробовать снова? (Y/n): " -n 1 -r
+            echo
+            if [[ $REPLY =~ ^[Nn]$ ]]; then
+                critical_error "Установка прервана"
+            fi
         fi
-    fi
 
-    # Проверка существования директории
-    if [ -d "/var/www/$project_name" ]; then
-        warn "Директория /var/www/$project_name уже существует"
-        read -p "Продолжить? (существующие данные могут быть перезаписаны) (y/n): " overwrite
-        [ "$overwrite" = "y" ] && break
-    else
-        break
-    fi
-done
-
-while true; do
-    read -p "Домен проекта: " domain
-    if validate_domain "$domain" && check_existing_domain "$domain"; then
-        break
-    else
-        read -p "Попробовать снова? (Y/n): " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Nn]$ ]]; then
-            critical_error "Установка прервана"
+        # Проверка существования директории
+        if [ -d "/var/www/$project_name" ]; then
+            warn "Директория /var/www/$project_name уже существует"
+            read -p "Продолжить? (существующие данные могут быть перезаписаны) (y/n): " overwrite
+            [ "$overwrite" = "y" ] && break
+        else
+            break
         fi
-    fi
-done
+    done
 
-while true; do
-    read -p "Тип проекта (static/php/laravel/symfony/bitrix/nodejs): " project_type
-    if validate_project_type "$project_type"; then
-        break
-    else
-        read -p "Попробовать снова? (Y/n): " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Nn]$ ]]; then
-            critical_error "Установка прервана"
+    while true; do
+        read -p "Домен проекта: " domain
+        if validate_domain "$domain" && check_existing_domain "$domain"; then
+            break
+        else
+            read -p "Попробовать снова? (Y/n): " -n 1 -r
+            echo
+            if [[ $REPLY =~ ^[Nn]$ ]]; then
+                critical_error "Установка прервана"
+            fi
         fi
-    fi
-done
+    done
 
-# Выбор окружения
-while true; do
-    read -p "Окружение (dev/prod, по умолчанию: dev): " environment
-    environment=${environment:-dev}
-    if validate_environment "$environment"; then
-        break
-    else
-        read -p "Попробовать снова? (Y/n): " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Nn]$ ]]; then
-            critical_error "Установка прервана"
+    while true; do
+        read -p "Тип проекта (static/php/laravel/symfony/bitrix/nodejs): " project_type
+        if validate_project_type "$project_type"; then
+            break
+        else
+            read -p "Попробовать снова? (Y/n): " -n 1 -r
+            echo
+            if [[ $REPLY =~ ^[Nn]$ ]]; then
+                critical_error "Установка прервана"
+            fi
         fi
-    fi
-done
+    done
 
-info "Выбрано окружение: $environment"
+    # Выбор окружения
+    while true; do
+        read -p "Окружение (dev/prod, по умолчанию: dev): " environment
+        environment=${environment:-dev}
+        if validate_environment "$environment"; then
+            break
+        else
+            read -p "Попробовать снова? (Y/n): " -n 1 -r
+            echo
+            if [[ $REPLY =~ ^[Nn]$ ]]; then
+                critical_error "Установка прервана"
+            fi
+        fi
+    done
+
+    info "Выбрано окружение: $environment"
+fi
 
 # Определение владельца файлов в зависимости от окружения
 if [ "$environment" = "dev" ]; then
@@ -1256,7 +1342,7 @@ fi
 
 is_php() { [[ "$project_type" == "php" || "$project_type" == "laravel" || "$project_type" == "symfony" || "$project_type" == "bitrix" ]]; }
 # Выбор версии PHP для PHP проектов
-if is_php; then
+if [ "$mode" = "install" ] && is_php; then
     php_version=""
     BITRIX_PHP_OPTIMIZED=0
     available_versions=($(detect_php_versions))
@@ -1296,145 +1382,147 @@ if is_php; then
     info "Выбрана версия PHP: $php_version"
 fi
 
-# Настройки Git
-use_git="n"
-if [ "$project_type" != "bitrix" ]; then
-    read -p "Клонировать из GitHub? (y/n): " use_git
-fi
-
-# Особые варианты для Bitrix
-bitrix_install_method=""
-if [ "$project_type" = "bitrix" ]; then
-    bitrix_info "Выберите способ установки Bitrix24:"
-    echo "  1) Клонировать из GitHub (официальный репозиторий)"
-    echo "  2) Скачать готовый дистрибутив"
-    echo "  3) Установить Bitrix24 Virtual Appliance (VM)"
-    echo "  4) Ручная установка (файлы уже в директории)"
-    while true; do
-        read -p "Выберите вариант (1-4): " bitrix_install_method
-        case "$bitrix_install_method" in
-            1)
-                repo_url="https://github.com/bitrix-docker/bitrix-docker.git"
-                use_git="y"
-                git_branch="master"
-                break
-                ;;
-            2)
-                bitrix_info "Будет скачан готовый дистрибутив Bitrix24"
-                break
-                ;;
-            3)
-                warn "Bitrix24 Virtual Appliance требует дополнительной настройки VMware/VirtualBox"
-                break
-                ;;
-            4)
-                info "Ручная установка - подготовьте файлы в директории /var/www/$project_name"
-                break
-                ;;
-            *)
-                echo "Неверный выбор. Попробуйте снова."
-                ;;
-        esac
-    done
-else
-    if [ "$use_git" = "y" ]; then
-        while true; do
-            read -p "URL репозитория: " repo_url
-            if validate_git_url "$repo_url"; then
-                break
-            else
-                read -p "Попробовать снова? (Y/n): " -n 1 -r
-                echo
-                if [[ $REPLY =~ ^[Nn]$ ]]; then
-                    use_git="n"
-                    break
-                fi
-            fi
-        done
-        if [ "$use_git" = "y" ]; then
-            read -p "Ветка (по умолчанию: main): " git_branch
-            git_branch=${git_branch:-main}
-        fi
-    fi
-fi
-
-create_db="n"
-if command -v mysql &> /dev/null; then
-    read -p "Создать БД MySQL? (y/n): " create_db
-fi
-
-# Настройка PHP-FPM
-if is_php; then
-    read -p "Имя PHP-FPM пула (по умолчанию: $project_name): " fpm_pool_name
-    fpm_pool_name=${fpm_pool_name:-$project_name}
-
-    # Валидация имени пула
-    if ! validate_project_name "$fpm_pool_name"; then
-        critical_error "Некорректное имя PHP-FPM пула"
+# Настройки Git (только для новой установки)
+if [ "$mode" = "install" ]; then
+    use_git="n"
+    if [ "$project_type" != "bitrix" ]; then
+        read -p "Клонировать из GitHub? (y/n): " use_git
     fi
 
-    # Проверка существования пула
-    if [ -f "/etc/php/$php_version/fpm/pool.d/$fpm_pool_name.conf" ]; then
-        warn "PHP-FPM пул $fpm_pool_name уже существует"
-        # Предлагаем варианты действий
-        echo ""
-        echo "Выберите действие для PHP-FPM пула '$fpm_pool_name':"
-        echo "  1) Обновить пул (удалить старый и создать новый)"
-        echo "  2) Использовать существующий пул (пропустить создание)"
-        echo "  3) Использовать другое имя для пула"
-        echo "  4) Прервать установку"
-
+    # Особые варианты для Bitrix
+    bitrix_install_method=""
+    if [ "$project_type" = "bitrix" ]; then
+        bitrix_info "Выберите способ установки Bitrix24:"
+        echo "  1) Клонировать из GitHub (официальный репозиторий)"
+        echo "  2) Скачать готовый дистрибутив"
+        echo "  3) Установить Bitrix24 Virtual Appliance (VM)"
+        echo "  4) Ручная установка (файлы уже в директории)"
         while true; do
-            read -p "Введите номер варианта (1-4): " pool_action
-            case "$pool_action" in
+            read -p "Выберите вариант (1-4): " bitrix_install_method
+            case "$bitrix_install_method" in
                 1)
-                    info "Обновление PHP-FPM пула '$fpm_pool_name'..."
-
-                    # Удаляем старый пул
-                    safe_execute "rm -f '/etc/php/$php_version/fpm/pool.d/$fpm_pool_name.conf'" "Удаление старого PHP-FPM пула" 0
-
-                    # Перезагружаем PHP-FPM
-                    if systemctl is-active --quiet "php$php_version-fpm"; then
-                        safe_systemctl "reload" "php$php_version-fpm" "Перезагрузка PHP-FPM после удаления пула"
-                    fi
-
-                    info "Старый PHP-FPM пул удален. Будет создан новый."
+                    repo_url="https://github.com/bitrix-docker/bitrix-docker.git"
+                    use_git="y"
+                    git_branch="master"
                     break
                     ;;
                 2)
-                    info "Используем существующий PHP-FPM пул '$fpm_pool_name'"
-                    SKIP_FPM_POOL_CREATION=1
+                    bitrix_info "Будет скачан готовый дистрибутив Bitrix24"
                     break
                     ;;
                 3)
-                    read -p "Введите новое имя для PHP-FPM пула: " new_fpm_pool_name
-                    if validate_project_name "$new_fpm_pool_name"; then
-                        # Проверяем, не существует ли уже новый пул
-                        if [ -f "/etc/php/$php_version/fpm/pool.d/$new_fpm_pool_name.conf" ]; then
-                            warn "PHP-FPM пул '$new_fpm_pool_name' также уже существует"
-                            read -p "Попробовать другое имя? (Y/n): " try_another
-                            if [[ $try_another =~ ^[Nn]$ ]]; then
-                                continue
-                            fi
-                        else
-                            fpm_pool_name="$new_fpm_pool_name"
-                            info "Имя PHP-FPM пула изменено на: $fpm_pool_name"
-                            break
-                        fi
-                    else
-                        warn "Некорректное имя пула, попробуйте снова"
-                    fi
+                    warn "Bitrix24 Virtual Appliance требует дополнительной настройки VMware/VirtualBox"
+                    break
                     ;;
                 4)
-                    critical_error "Установка прервана пользователем"
+                    info "Ручная установка - подготовьте файлы в директории /var/www/$project_name"
+                    break
                     ;;
                 *)
-                    warn "Неверный выбор. Попробуйте снова."
+                    echo "Неверный выбор. Попробуйте снова."
                     ;;
             esac
         done
     else
-        SKIP_FPM_POOL_CREATION=0
+        if [ "$use_git" = "y" ]; then
+            while true; do
+                read -p "URL репозитория: " repo_url
+                if validate_git_url "$repo_url"; then
+                    break
+                else
+                    read -p "Попробовать снова? (Y/n): " -n 1 -r
+                    echo
+                    if [[ $REPLY =~ ^[Nn]$ ]]; then
+                        use_git="n"
+                        break
+                    fi
+                fi
+            done
+            if [ "$use_git" = "y" ]; then
+                read -p "Ветка (по умолчанию: main): " git_branch
+                git_branch=${git_branch:-main}
+            fi
+        fi
+    fi
+
+    create_db="n"
+    if command -v mysql &> /dev/null; then
+        read -p "Создать БД MySQL? (y/n): " create_db
+    fi
+
+    # Настройка PHP-FPM
+    if is_php; then
+        read -p "Имя PHP-FPM пула (по умолчанию: $project_name): " fpm_pool_name
+        fpm_pool_name=${fpm_pool_name:-$project_name}
+
+        # Валидация имени пула
+        if ! validate_project_name "$fpm_pool_name"; then
+            critical_error "Некорректное имя PHP-FPM пула"
+        fi
+
+        # Проверка существования пула
+        if [ -f "/etc/php/$php_version/fpm/pool.d/$fpm_pool_name.conf" ]; then
+            warn "PHP-FPM пул $fpm_pool_name уже существует"
+            # Предлагаем варианты действий
+            echo ""
+            echo "Выберите действие для PHP-FPM пула '$fpm_pool_name':"
+            echo "  1) Обновить пул (удалить старый и создать новый)"
+            echo "  2) Использовать существующий пул (пропустить создание)"
+            echo "  3) Использовать другое имя для пула"
+            echo "  4) Прервать установку"
+
+            while true; do
+                read -p "Введите номер варианта (1-4): " pool_action
+                case "$pool_action" in
+                    1)
+                        info "Обновление PHP-FPM пула '$fpm_pool_name'..."
+
+                        # Удаляем старый пул
+                        safe_execute "rm -f '/etc/php/$php_version/fpm/pool.d/$fpm_pool_name.conf'" "Удаление старого PHP-FPM пула" 0
+
+                        # Перезагружаем PHP-FPM
+                        if systemctl is-active --quiet "php$php_version-fpm"; then
+                            safe_systemctl "reload" "php$php_version-fpm" "Перезагрузка PHP-FPM после удаления пула"
+                        fi
+
+                        info "Старый PHP-FPM пул удален. Будет создан новый."
+                        break
+                        ;;
+                    2)
+                        info "Используем существующий PHP-FPM пул '$fpm_pool_name'"
+                        SKIP_FPM_POOL_CREATION=1
+                        break
+                        ;;
+                    3)
+                        read -p "Введите новое имя для PHP-FPM пула: " new_fpm_pool_name
+                        if validate_project_name "$new_fpm_pool_name"; then
+                            # Проверяем, не существует ли уже новый пул
+                            if [ -f "/etc/php/$php_version/fpm/pool.d/$new_fpm_pool_name.conf" ]; then
+                                warn "PHP-FPM пул '$new_fpm_pool_name' также уже существует"
+                                read -p "Попробовать другое имя? (Y/n): " try_another
+                                if [[ $try_another =~ ^[Nn]$ ]]; then
+                                    continue
+                                fi
+                            else
+                                fpm_pool_name="$new_fpm_pool_name"
+                                info "Имя PHP-FPM пула изменено на: $fpm_pool_name"
+                                break
+                            fi
+                        else
+                            warn "Некорректное имя пула, попробуйте снова"
+                        fi
+                        ;;
+                    4)
+                        critical_error "Установка прервана пользователем"
+                        ;;
+                    *)
+                        warn "Неверный выбор. Попробуйте снова."
+                        ;;
+                esac
+            done
+        else
+            SKIP_FPM_POOL_CREATION=0
+        fi
     fi
 fi
 
@@ -1451,6 +1539,7 @@ echo "  Директория: /var/www/$project_name"
 [ "$project_type" = "bitrix" ] && echo "  Способ установки Bitrix: $bitrix_install_method"
 [ "$create_db" = "y" ] && echo "  Будет создана БД MySQL"
 is_php && echo "  PHP-FPM пул: $fpm_pool_name"
+[ "$mode" = "rebuild" ] && echo "  РЕЖИМ: ПЕРЕСБОРКА СУЩЕСТВУЮЩЕГО ПРОЕКТА"
 
 read -p "Продолжить установку? (y/n): " confirm
 if [[ ! $confirm =~ ^[Yy]$ ]]; then
@@ -1460,12 +1549,15 @@ fi
 echo ""
 step "Начало установки..."
 
-# Создание директорий
+# Создание директорий (только для новой установки)
 project_dir="/var/www/$project_name"
-safe_mkdir "$project_dir" "Создание корневой директории проекта"
+if [ "$mode" = "install" ]; then
+    safe_mkdir "$project_dir" "Создание корневой директории проекта"
+    safe_chmod "$project_dir" "755" "Установка прав корневой директории проекта"
+fi
 
-# Установка Bitrix24
-if [ "$project_type" = "bitrix" ]; then
+# Установка Bitrix24 (только для новой установки)
+if [ "$mode" = "install" ] && [ "$project_type" = "bitrix" ]; then
     step "Установка Bitrix24..."
 
     case "$bitrix_install_method" in
@@ -1498,21 +1590,29 @@ if [ "$project_type" = "bitrix" ]; then
         safe_mkdir "$project_dir/bitrix/managed_cache" "Создание директории managed_cache для Bitrix"
         safe_mkdir "$project_dir/bitrix/stack_cache" "Создание директории stack_cache для Bitrix"
         safe_mkdir "$project_dir/bitrix/html_pages" "Создание директории html_pages для Bitrix"
+
+        # Права доступа для Bitrix
+        setup_permissions "$project_dir" "$project_type" "$environment" "$php_version"
     fi
 fi
 
-# Клонирование репозитория для других проектов
-if [ "$use_git" = "y" ] && [ "$project_type" != "bitrix" ]; then
+# Клонирование репозитория для других проектов (только для новой установки)
+if [ "$mode" = "install" ] && [ "$use_git" = "y" ] && [ "$project_type" != "bitrix" ]; then
     step "Клонирование репозитория..."
     if [ -d "$project_dir/.git" ]; then
         warn "Директория уже содержит git репозиторий, пропускаем клонирование"
     else
         safe_execute "git clone -b '$git_branch' '$repo_url' '$project_dir'" "Клонирование репозитория" 0
+        if [ $? -eq 0 ]; then
+            setup_permissions "$project_dir" "$project_type" "$environment" "$php_version"
+        fi
     fi
 fi
 
-# Настройка Git workflow
-setup_git_workflow "$project_type" "$environment" "$project_dir"
+# Настройка Git workflow (только для новой установки)
+if [ "$mode" = "install" ]; then
+    setup_git_workflow "$project_type" "$environment" "$project_dir"
+fi
 
 # Создание PHP-FPM пула
 if is_php; then
@@ -1644,6 +1744,10 @@ env[PATH] = /usr/local/bin:/usr/bin:/bin
 env[TMP] = /tmp
 env[TMPDIR] = /tmp
 env[TEMP] = /tmp
+
+; Переменные окружения
+env[APP_ENV] = $environment
+env[APP_DEBUG] = $([ \"$environment\" = \"dev\" ] && echo \"true\" || echo \"false\")
 EOF" "Создание PHP-FPM конфигурации" 1
 
         # Перезагрузка PHP-FPM
@@ -1921,8 +2025,8 @@ if [ $? -eq 0 ]; then
     fi
 fi
 
-# Создание БД
-if [ "$create_db" = "y" ] && ([ $ERROR_OCCURRED -eq 0 ] || [ $SKIP_STEP -eq 0 ]); then
+# Создание БД (только для новой установки)
+if [ "$mode" = "install" ] && [ "$create_db" = "y" ] && ([ $ERROR_OCCURRED -eq 0 ] || [ $SKIP_STEP -eq 0 ]); then
     step "Создание базы данных..."
 
     # Добавляем префикс окружения к имени БД
@@ -1961,12 +2065,9 @@ if [ "$create_db" = "y" ] && ([ $ERROR_OCCURRED -eq 0 ] || [ $SKIP_STEP -eq 0 ])
 EOF" "Создание файла с данными БД" 0
 
         if [ $? -eq 0 ]; then
+            safe_chmod "$project_dir/database_credentials.txt" "600"
+            safe_chown "$project_dir/database_credentials.txt"
             warn "Данные БД сохранены в $project_dir/database_credentials.txt"
-        fi
-
-        # Настройка environment файлов для поддерживаемых типов проектов
-        if [[ "$project_type" == "laravel" || "$project_type" == "symfony" || "$project_type" == "nodejs" ]]; then
-            setup_env_files "$project_dir" "$project_type" "$environment" "$db_name" "$db_user" "$db_pass"
         fi
     fi
 
@@ -1997,13 +2098,13 @@ EOF" "Для Bitrix создаем дополнительный файл с на
             sed -i "s/DB_NAME/$db_name/g" "$bitrix_db_file"
             sed -i "s/DB_USER/$db_user/g" "$bitrix_db_file"
             sed -i "s/DB_PASSWORD/$db_pass/g" "$bitrix_db_file"
-            info "Создан файл настроек БД для Bitrix: $bitrix_db_file"
+            safe_chown "$bitrix_db_file"
         fi
     fi
 fi
 
 # Установка Composer зависимостей для PHP проектов
-if is_php && [ -f "$project_dir/composer.json" ]; then
+if [ "$mode" = "install" ] && is_php; then
     step "Установка Composer зависимостей..."
 
     # Определяем флаги для composer в зависимости от окружения
@@ -2014,25 +2115,156 @@ if is_php && [ -f "$project_dir/composer.json" ]; then
         composer_flags="--no-interaction"
     fi
 
-    # Определяем пользователя для запуска composer
-    if [ "$environment" = "dev" ]; then
-        COMPOSER_USER="$SUDO_USER"
+    # Проверяем наличие composer.json
+    if [ -f "$project_dir/composer.json" ]; then
+        info "Найден composer.json, устанавливаем зависимости..."
+
+        # Определяем пользователя для запуска composer
+        if [ "$environment" = "dev" ]; then
+            COMPOSER_USER="$SUDO_USER"
+        else
+            COMPOSER_USER="www-data"
+        fi
+
+        # Устанавливаем зависимости
+        safe_execute "cd '$project_dir' && sudo -u $COMPOSER_USER composer install $composer_flags" "Установка Composer зависимостей" 0
+
+        if [ $? -eq 0 ]; then
+            info "Composer зависимости успешно установлены"
+
+            # Обновляем права после установки зависимостей
+            setup_permissions "$project_dir" "$project_type" "$environment" "$php_version"
+        fi
     else
-        COMPOSER_USER="www-data"
+        info "composer.json не найден, пропускаем установку зависимостей"
     fi
-
-    # Настраиваем права vendor/bin
-    setup_vendor_permissions "$project_dir" "$environment"
-
-    # Устанавливаем зависимости
-    safe_execute "cd '$project_dir' && sudo -u $COMPOSER_USER composer install $composer_flags" "Установка Composer зависимостей" 0
 fi
 
 # Установка NPM зависимостей и запуск npm скриптов
-setup_npm_dependencies "$project_dir" "$project_type" "$environment"
+if [ "$mode" = "install" ]; then
+    setup_npm_dependencies "$project_dir" "$project_type" "$environment"
+    diagnose_and_fix_npm "$project_dir"
+fi
 
 # Дополнительные настройки для фреймворков с учетом окружения
 case "$project_type" in
+    laravel)
+        step "Настройка Laravel..."
+
+        # Проверка существования composer.json
+        if [ -f "$project_dir/composer.json" ]; then
+            # Установка прав для storage и bootstrap/cache
+            setup_permissions "$project_dir" "$project_type" "$environment" "$php_version"
+
+            # Создание .env файла (только для новой установки)
+            if [ "$mode" = "install" ] && [ ! -f "$project_dir/.env" ]; then
+                if [ -f "$project_dir/.env.example" ]; then
+                    safe_execute "cp '$project_dir/.env.example' '$project_dir/.env'" "Копирование .env примера" 0
+                else
+                    # Создаем базовый .env
+                    safe_execute "cat > '$project_dir/.env' << EOF
+APP_NAME=\"$project_name\"
+APP_ENV=$environment
+APP_KEY=
+APP_DEBUG=$([ \"$environment\" = \"dev\" ] && echo \"true\" || echo \"false\")
+APP_URL=http://$domain
+
+LOG_CHANNEL=stack
+LOG_LEVEL=debug
+
+DB_CONNECTION=mysql
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_DATABASE=$db_name
+DB_USERNAME=$db_user
+DB_PASSWORD=$db_pass
+
+BROADCAST_DRIVER=log
+CACHE_DRIVER=file
+QUEUE_CONNECTION=sync
+SESSION_DRIVER=file
+SESSION_LIFETIME=120
+
+REDIS_HOST=127.0.0.1
+REDIS_PASSWORD=null
+REDIS_PORT=6379
+
+MAIL_MAILER=smtp
+MAIL_HOST=mailhog
+MAIL_PORT=1025
+MAIL_USERNAME=null
+MAIL_PASSWORD=null
+MAIL_ENCRYPTION=null
+MAIL_FROM_ADDRESS=null
+MAIL_FROM_NAME=\"\\\${APP_NAME}\"
+
+AWS_ACCESS_KEY_ID=
+AWS_SECRET_ACCESS_KEY=
+AWS_DEFAULT_REGION=us-east-1
+AWS_BUCKET=
+
+PUSHER_APP_ID=
+PUSHER_APP_KEY=
+PUSHER_APP_SECRET=
+PUSHER_APP_CLUSTER=mt1
+
+MIX_PUSHER_APP_KEY=\"\\\${PUSHER_APP_KEY}\"
+MIX_PUSHER_APP_CLUSTER=\"\\\${PUSHER_APP_CLUSTER}\"
+EOF" "Создание .env файла" 0
+                fi
+                if [ $? -eq 0 ]; then
+                    safe_chown "$project_dir/.env"
+                    # Генерируем ключ приложения
+                    safe_execute "cd '$project_dir' && sudo -u www-data /usr/bin/php$php_version artisan key:generate" "Генерация ключа приложения Laravel" 0
+                    warn "Создан .env файл для окружения $environment"
+                fi
+            fi
+        else
+            warn "composer.json не найден. Laravel может требовать дополнительной настройки."
+        fi
+        ;;
+
+    symfony)
+        step "Настройка Symfony..."
+
+        # Проверка существования composer.json
+        if [ -f "$project_dir/composer.json" ]; then
+            # Установка прав для var и config
+            setup_permissions "$project_dir" "$project_type" "$environment" "$php_version"
+
+            # Копирование .env файла если его нет (только для новой установки)
+            if [ "$mode" = "install" ] && [ ! -f "$project_dir/.env" ] && { [ -f "$project_dir/.env.example" ] || [ -f "$project_dir/.env.dist" ]; }; then
+                if [ -f "$project_dir/.env.example" ]; then
+                    cp $project_dir/.env.example $project_dir/.env
+                elif [ -f "$project_dir/.env.dist" ]; then
+                    cp $project_dir/.env.dist $project_dir/.env
+                fi
+                safe_chown "$project_dir/.env"
+
+                # Обновление .env с данными БД если создавали БД
+                if [ "$create_db" = "y" ]; then
+                    # Symfony использует DATABASE_URL
+                    database_url="mysql://$db_user:$db_pass@localhost:3306/$db_name?serverVersion=8.0&charset=utf8mb4"
+                    escaped_url=$(printf '%s\n' "$database_url" | sed -e 's/[\/&]/\\&/g')
+                    sed -i "s|DATABASE_URL=.*|DATABASE_URL=\"$escaped_url\"|" $project_dir/.env
+                fi
+
+                # Устанавливаем окружение
+                sed -i "s|APP_ENV=.*|APP_ENV=$environment|" $project_dir/.env
+                sed -i "s|APP_DEBUG=.*|APP_DEBUG=$([ "$environment" = "dev" ] && echo "1" || echo "0")|" $project_dir/.env
+
+                warn "Создан .env файл. Проверьте настройки."
+            fi
+
+            # Создание автоматического .env.local.php для оптимизации
+            if [ -f "$project_dir/.env" ]; then
+                sudo -u www-data /usr/bin/php$php_version $project_dir/bin/console --env=prod >/dev/null 2>&1 || true
+            fi
+        else
+            warn "composer.json не найден. Symfony может требовать дополнительной настройки."
+        fi
+        ;;
+
     bitrix)
         step "Дополнительная настройка Bitrix24..."
 
@@ -2122,6 +2354,129 @@ esac
 # Финальная настройка прав доступа
 setup_permissions "$project_dir" "$project_type" "$environment" "$php_version"
 
+# Создание деплой скрипта для проекта
+deploy_script="$project_dir/deploy.sh"
+safe_execute "cat > '$deploy_script' << 'EOF'
+#!/bin/bash
+# Скрипт деплоя для $project_name
+
+ENV=\\\${1:-$environment}
+cd $project_dir
+
+echo \"Деплой проекта $project_name в окружении: \\\$ENV\"
+
+# Обновление кода
+if [ -d \".git\" ]; then
+    git fetch origin
+    git reset --hard origin/\\\$([ \"\\\$ENV\" = \"prod\" ] && echo \"main\" || echo \"dev\")
+fi
+
+# Зависимости PHP проектов
+case \"$project_type\" in
+    laravel|symfony|php)
+        # Установка/обновление композера
+        if [ ! -f \"composer.phar\" ]; then
+            curl -sS https://getcomposer.org/installer | php -- --install-dir=.
+        fi
+
+        # Установка зависимостей
+        if [ \"$project_type\" = \"laravel\" ]; then
+            php composer.phar install --no-dev --optimize-autoloader
+            php artisan config:cache
+            php artisan route:cache
+            php artisan view:cache
+            php artisan migrate --force
+        elif [ \"$project_type\" = \"symfony\" ]; then
+            php composer.phar install --no-dev --optimize-autoloader
+            php bin/console cache:clear --env=\\\$ENV
+            php bin/console cache:warmup --env=\\\$ENV
+            php bin/console doctrine:migrations:migrate --no-interaction --env=\\\$ENV
+        else
+            php composer.phar install --no-dev --optimize-autoloader
+        fi
+        ;;
+
+    bitrix)
+        # Обновление Bitrix
+        if [ -f \"bitrix/updates/update.php\" ]; then
+            echo \"Проверка обновлений Bitrix24...\"
+            /usr/bin/php$php_version bitrix/updates/update.php
+        fi
+
+        # Очистка кеша Bitrix
+        if [ -d \"bitrix/cache\" ]; then
+            rm -rf bitrix/cache/*
+            rm -rf bitrix/managed_cache/*
+            rm -rf bitrix/stack_cache/*
+            rm -rf bitrix/html_pages/*
+        fi
+        ;;
+esac
+
+# Установка NPM зависимостей
+if [ -f \"package.json\" ]; then
+    echo \"Установка NPM зависимостей...\"
+    npm install
+
+    # Запуск NPM скриптов в зависимости от окружения
+    if [ \"\\\$ENV\" = \"prod\" ]; then
+        if npm run | grep -q \" prod \"; then
+            npm run prod
+        elif npm run | grep -q \" build \"; then
+            npm run build
+        fi
+    else
+        if npm run | grep -q \" dev \"; then
+            npm run dev
+        elif npm run | grep -q \" build \"; then
+            npm run build
+        fi
+    fi
+fi
+
+# Права доступа
+$(declare -f setup_permissions)
+setup_permissions \"$project_dir\" \"$project_type\" \"\\\$ENV\" \"$php_version\"
+
+# Настройка окружения
+if [ -f \"$project_dir/setup-environment.sh\" ]; then
+    $project_dir/setup-environment.sh \\\$ENV
+fi
+
+# Перезагрузка PHP-FPM
+systemctl reload php$php_version-fpm
+
+echo \"Деплой проекта $project_name в окружении \\\$ENV завершен\"
+EOF" "Создание скрипта деплоя" 0
+
+if [ $? -eq 0 ]; then
+    safe_chmod "$deploy_script" "+x"
+    info "Создан скрипт деплоя: $deploy_script"
+fi
+
+# Создание скрипта пересборки
+rebuild_script="$project_dir/rebuild.sh"
+safe_execute "cat > '$rebuild_script' << 'EOF'
+#!/bin/bash
+# Скрипт пересборки проекта $project_name
+
+echo \"Пересборка проекта $project_name...\"
+echo \"Этот скрипт позволяет изменить конфигурацию проекта без потери данных.\"
+
+# Запускаем основной скрипт в режиме пересборки
+sudo \$(readlink -f \"\$0\") --rebuild
+
+echo \"Пересборка завершена!\"
+EOF" "Создание скрипта пересборки" 0
+
+if [ $? -eq 0 ]; then
+    safe_chmod "$rebuild_script" "+x"
+    info "Создан скрипт пересборки: $rebuild_script"
+fi
+
+# Сохранение конфигурации проекта
+save_project_config "$project_dir"
+
 # Показываем сводку установки
 echo ""
 if [ $ERROR_OCCURRED -eq 0 ]; then
@@ -2140,6 +2495,7 @@ echo "  Директория: $project_dir"
 is_php && echo "  Версия PHP: $php_version"
 is_php && echo "  PHP-FPM пул: $fpm_pool_name"
 echo ""
+[ "$mode" = "rebuild" ] && rebuild_info "ПРОЕКТ ПЕРЕСОБРАН!" && echo ""
 
 if [ $ERROR_OCCURRED -eq 0 ]; then
     echo "Git workflow:"
@@ -2147,18 +2503,6 @@ if [ $ERROR_OCCURRED -eq 0 ]; then
     echo "  - Используйте ветку '$([ "$environment" = "prod" ] && echo "main" || echo "dev")' для этого окружения"
     echo ""
 fi
-
-echo "Environment файлы:"
-if [[ "$project_type" == "laravel" || "$project_type" == "symfony" || "$project_type" == "nodejs" ]]; then
-    echo "  - .env - основной файл настроек"
-    if [ "$environment" = "dev" ]; then
-        echo "  - .env.local - локальные настройки для разработки (не в git)"
-    fi
-    if [ "$project_type" = "symfony" ] && [ "$environment" = "prod" ]; then
-        echo "  - .env.prod.local - продакшен настройки"
-    fi
-fi
-echo ""
 
 echo "Следующие шаги:"
 case "$project_type" in
@@ -2168,23 +2512,30 @@ case "$project_type" in
         else
             echo "  - Настройте .env файл вручную"
         fi
+        echo "  - Для деплоя: $deploy_script $environment"
         ;;
     symfony)
         echo "  - Выполните: cd $project_dir && php bin/console secrets:generate-keys"
         echo "  - Настройте .env файл если необходимо"
+        echo "  - Для деплоя: $deploy_script $environment"
         ;;
     bitrix)
         echo "  - Откройте http://$domain в браузере для завершения установки Bitrix24"
         echo "  - Настройте административную панель Bitrix"
+        echo "  - Для деплоя: $deploy_script $environment"
         ;;
     nodejs)
         echo "  - Запустите Node.js приложение на порту 3000"
+        echo "  - Для деплоя: $deploy_script $environment"
         ;;
 esac
 
 echo ""
 echo "Управление проектом:"
 [ -f "$project_dir/setup-environment.sh" ] && echo "  - Смена окружения: $project_dir/setup-environment.sh [dev|prod]"
+[ -f "$deploy_script" ] && echo "  - Деплой: $deploy_script [dev|prod]"
+[ -f "$rebuild_script" ] && echo "  - Пересборка: $rebuild_script"
+[ -f "$project_dir/.deploy-config" ] && echo "  - Конфигурация: $project_dir/.deploy-config"
 echo ""
 
 if [ $ERROR_OCCURRED -eq 1 ]; then

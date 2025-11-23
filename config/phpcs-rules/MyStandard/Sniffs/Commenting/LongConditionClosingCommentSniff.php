@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace MyStandard\Sniffs\Commenting;
 
 use PHP_CodeSniffer\Files\File;
@@ -7,7 +9,6 @@ use PHP_CodeSniffer\Sniffs\Sniff;
 
 class LongConditionClosingCommentSniff implements Sniff
 {
-
     /**
      * The condition openers that we are interested in.
      *
@@ -39,7 +40,7 @@ class LongConditionClosingCommentSniff implements Sniff
      *
      * @var string
      */
-    public $commentFormat = '//end %s';
+    public $commentFormat = '// end %s';
 
 
     /**
@@ -170,40 +171,32 @@ class LongConditionClosingCommentSniff implements Sniff
                     }
 
                     // MODIFIED: Add space before comment
-                    $phpcsFile->fixer->addContent($stackPtr, ' ' . $expected);
+                    $phpcsFile->fixer->addContent($stackPtr, $expected);
                 }
             }
 
             return;
         }
 
-        // MODIFIED: Check for proper spacing (exactly one space)
-        $spaceBetween = '';
-        for ($i = $stackPtr + 1; $i < $comment; $i++) {
-            $spaceBetween .= $tokens[$i]['content'];
+        if (($comment - $stackPtr) !== 1) {
+            $error = 'Space found before closing comment; expected "%s"';
+            $data  = [$expected];
+            $phpcsFile->addError($error, $stackPtr, 'SpacingBefore', $data);
         }
 
-        $hasCorrectSpacing = ($spaceBetween === ' ');
-        $hasCorrectComment = (trim($tokens[$comment]['content']) === $expected);
+        if (trim($tokens[$comment]['content']) !== $expected) {
+            $found = trim($tokens[$comment]['content']);
+            $error = 'Incorrect closing comment; expected "%s" but found "%s"';
+            $data  = [
+                $expected,
+                $found,
+            ];
 
-        if (!$hasCorrectSpacing || !$hasCorrectComment) {
-            $error = 'Expected "%s" with single space after closing brace';
-            $data  = [$expected];
-            $fix = $phpcsFile->addFixableError($error, $stackPtr, 'SpacingOrComment', $data);
-
+            $fix = $phpcsFile->addFixableError($error, $stackPtr, 'Invalid', $data);
             if ($fix === true) {
-                $phpcsFile->fixer->beginChangeset();
-
-                // Remove everything between } and comment
-                for ($i = $stackPtr + 1; $i < $comment; $i++) {
-                    $phpcsFile->fixer->replaceToken($i, '');
-                }
-
-                // Replace the comment with proper spacing
-                $phpcsFile->fixer->replaceToken($comment, ' ' . $expected);
-
-                $phpcsFile->fixer->endChangeset();
+                $phpcsFile->fixer->replaceToken($comment, $expected . $phpcsFile->eolChar);
             }
+
             return;
         }
     }

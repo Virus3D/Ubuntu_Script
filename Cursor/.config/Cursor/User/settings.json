@@ -30,18 +30,6 @@
     "less",
     "postcss"
   ],
-  // PHP Code Sniffer
-  "phpcs.enable": true,
-  "phpcs.standard": "PSR12",
-  "phpcs.workspaceRoot": null,
-  "phpcs.ignorePatterns": [
-    "**/vendor/**",
-    "**/node_modules/**",
-    "**/storage/**",
-    "**/cache/**"
-  ],
-  "phpcs.showWarnings": true,
-  "phpcs.showSources": true,
   // Общие настройки линтинга
   "editor.codeActionsOnSave": {
     "source.fixAll.eslint": "explicit",
@@ -81,6 +69,22 @@
   "editor.renderLineHighlight": "none",
   "editor.suggest.snippetsPreventQuickSuggestions": false,
   "editor.inlineSuggest.enabled": true,
+  "editor.rulers": [
+    {
+      "column": 125,
+      "color": "#ff8f8f"
+    }
+  ],
+  "[php]": {
+    "editor.defaultFormatter": "valeryanm.vscode-phpsab",
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+      "source.fixAll.intelephense": "explicit"
+    }
+  },
+  "[html]": {
+    "editor.formatOnSave": false
+  },
   "typescript.suggest.autoImports": true,
   "javascript.suggest.autoImports": true,
   "phpsab.executablePathCBF": "[HOME]/.config/composer/vendor/bin/phpcbf",
@@ -90,13 +94,6 @@
   "phpsab.composerJsonPath": "composer.json",
   "phpsab.debug": true,
   "phpsab.autoRulesetSearch": false,
-  "[php]": {
-    "editor.defaultFormatter": "valeryanm.vscode-phpsab",
-    "editor.formatOnSave": true,
-    "editor.codeActionsOnSave": {
-      "source.fixAll.intelephense": "explicit"
-    }
-  },
   "php-cs-fixer.executablePath": "~/.config/composer/vendor/bin/php-cs-fixer",
   "php-cs-fixer.executablePathWindows": "", //eg: php-cs-fixer.bat
   "php-cs-fixer.onsave": false,
@@ -221,4 +218,10 @@
   "files.associations": {
     "*.twig": "html"
   },
+  "htmlhint.documentSelector": [
+    "html",
+    "twig"
+  ],
+  "htmlhint.configFile": "[HOME]/.htmlhintrc",
+  "twigcs.executablePath": "[HOME]/.config/composer/vendor/bin/twigcs",
 }
