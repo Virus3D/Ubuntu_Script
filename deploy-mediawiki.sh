@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Скрипт для автоматической установки MediaWiki с Nginx на Ubuntu
+# Скрипт для автоматической установки MediaWiki с Nginx и SSL на Ubuntu
 # Требует запуска с правами root
 
 set -e # Выход при ошибке
@@ -32,7 +32,7 @@ DB_PASS=$(openssl rand -base64 32)
 MEDIAWIKI_VERSION="1.44.2"
 WEB_DIR="/var/www"
 MW_DIR="$WEB_DIR/mediawiki"
-DOMAIN_NAME="wiki.localhost" # Замените на ваш домен или IP
+DOMAIN_NAME="wiki.yourdomain.com" # ЗАМЕНИТЕ на ваш реальный домен
 
 # Версия PHP (можно изменить на нужную)
 PHP_VERSION="8.4"
@@ -51,8 +51,8 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 # Проверка домена
-if [ "$DOMAIN_NAME" = "wiki.localhost" ] || [ "$DOMAIN_NAME" = "localhost" ]; then
-    warning "Домен localhost не поддерживает SSL. Используйте реальный домен для SSL."
+if [ "$DOMAIN_NAME" = "wiki.yourdomain.com" ] || [ "$DOMAIN_NAME" = "localhost" ]; then
+    warning "Используется домен по умолчанию. Замените DOMAIN_NAME на ваш реальный домен для работы SSL."
     SSL_ENABLED=false
 else
     SSL_ENABLED=true
@@ -73,7 +73,7 @@ apt install -y $PHP_PACKAGES
 # Загрузка и распаковка MediaWiki
 info "Загрузка MediaWiki..."
 cd /tmp
-wget https://releases.wikimedia.org/mediawiki/${MEDIAWIKI_VERSION%.*}/mediawiki-${MEDIAWIKI_VERSION}.tar.gz
+wget -q https://releases.wikimedia.org/mediawiki/${MEDIAWIKI_VERSION%.*}/mediawiki-${MEDIAWIKI_VERSION}.tar.gz
 tar -xzf mediawiki-${MEDIAWIKI_VERSION}.tar.gz
 mkdir -p $MW_DIR
 cp -r mediawiki-${MEDIAWIKI_VERSION}/* $MW_DIR/
@@ -82,7 +82,7 @@ cp -r mediawiki-${MEDIAWIKI_VERSION}/* $MW_DIR/
 info "Настройка базы данных..."
 mysql -e "CREATE DATABASE IF NOT EXISTS $DB_NAME CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
 mysql -e "CREATE USER IF NOT EXISTS '$DB_USER'@'localhost' IDENTIFIED BY '$DB_PASS';"
-mysql -e "GRANT ALL PRARIVILEGES ON $DB_NAME.* TO '$DB_USER'@'localhost';"
+mysql -e "GRANT ALL PRIVILEGES ON $DB_NAME.* TO '$DB_USER'@'localhost';"
 mysql -e "FLUSH PRIVILEGES;"
 
 # Создание отдельного PHP-FPM pool для MediaWiki
@@ -107,7 +107,7 @@ pm.max_requests = ${FPM_MAX_REQUESTS}
 pm.status_path = /status
 
 ; Безопасность
-security.limit_extensions = .php .php3 .php4 .php5 .php7
+security.limit_extensions = .php
 
 ; Настройки PHP для MediaWiki
 php_admin_value[upload_max_filesize] = 100M
@@ -127,8 +127,16 @@ php_flag[display_errors] = off
 php_admin_flag[log_errors] = on
 EOF
 
-# Настройка Nginx
+# Настройка основного конфига Nginx для устранения конфликта SSL
+info "Настройка основного конфига Nginx..."
+if ! grep -q "ssl_session_cache" /etc/nginx/nginx.conf; then
+    # Добавляем настройки SSL в основной конфиг, если их нет
+    sed -i '/http {/a\    ssl_session_cache shared:SSL:10m;\n    ssl_session_timeout 10m;' /etc/nginx/nginx.conf
+fi
+
+# Настройка виртуального хоста Nginx
 info "Настройка Nginx..."
+
 if [ "$SSL_ENABLED" = true ]; then
     # Конфиг с SSL
     cat > /etc/nginx/sites-available/mediawiki <<EOF
@@ -149,16 +157,15 @@ server {
     ssl_certificate /etc/letsencrypt/live/$DOMAIN_NAME/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/$DOMAIN_NAME/privkey.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers ECDHE-RSA-AES256-GCM-SHA512:DHE-RSA-AES256-GCM-SHA512:ECDHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES256-GCM-SHA384;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384;
     ssl_prefer_server_ciphers off;
-    ssl_session_cache shared:SSL:10m;
-    ssl_session_timeout 10m;
 
     # Security headers
     add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
     add_header X-Content-Type-Options nosniff;
     add_header X-Frame-Options DENY;
     add_header X-XSS-Protection "1; mode=block";
+    add_header Referrer-Policy "strict-origin-when-cross-origin";
 
     # Запрет доступа к скрытым файлам
     location ~ /\. {
@@ -287,35 +294,117 @@ find $MW_DIR -type f -exec chmod 644 {} \;
 ln -sf /etc/nginx/sites-available/mediawiki /etc/nginx/sites-enabled/
 rm -f /etc/nginx/sites-enabled/default
 
+# Проверка конфигурации перед перезапуском
+info "Проверка конфигурации Nginx..."
+if ! nginx -t; then
+    warning "Обнаружены ошибки в конфигурации Nginx. Пытаемся исправить..."
+    
+    # Резервное копирование и очистка конфликтующих конфигов
+    cp /etc/nginx/nginx.conf /etc/nginx/nginx.conf.backup
+    
+    # Упрощаем конфиг, убираем дублирующиеся настройки SSL
+    sed -i '/ssl_session_cache/d' /etc/nginx/nginx.conf
+    sed -i '/ssl_session_timeout/d' /etc/nginx/nginx.conf
+    
+    # Добавляем единую настройку SSL
+    if ! grep -q "ssl_session_cache" /etc/nginx/nginx.conf; then
+        sed -i '/http {/a\    ssl_session_cache shared:SSL:10m;\n    ssl_session_timeout 10m;' /etc/nginx/nginx.conf
+    fi
+    
+    # Проверяем еще раз
+    nginx -t
+fi
+
+# Перезапуск служб
 info "Перезапуск служб..."
 systemctl restart nginx php${PHP_VERSION}-fpm
 
 # Получение SSL сертификата
 if [ "$SSL_ENABLED" = true ]; then
     info "Получение SSL сертификата от Let's Encrypt..."
-
-    # Временно останавливаем nginx для certbot
+    
+    # Останавливаем nginx для certbot (standalone mode)
     systemctl stop nginx
-
+    
     # Получаем сертификат
     if certbot certonly --standalone -d $DOMAIN_NAME --non-interactive --agree-tos --email $EMAIL; then
         info "SSL сертификат успешно получен!"
-
+        
         # Настройка автоматического обновления сертификатов
-        (crontab -l 2>/dev/null; echo "0 12 * * * /usr/bin/certbot renew --quiet") | crontab -
+        (crontab -l 2>/dev/null; echo "0 12 * * * /usr/bin/certbot renew --quiet && systemctl reload nginx") | crontab -
         info "Добавлена задача автоматического обновления SSL сертификатов"
     else
         warning "Не удалось получить SSL сертификат. Продолжаем без SSL..."
         SSL_ENABLED=false
-    fi
+        
+        # Убираем SSL конфиг если сертификат не получен
+        cat > /etc/nginx/sites-available/mediawiki <<EOF
+server {
+    listen 80;
+    server_name $DOMAIN_NAME;
+    root $MW_DIR;
+    index index.php index.html index.htm;
 
+    # Запрет доступа к скрытым файлам
+    location ~ /\. {
+        deny all;
+        access_log off;
+        log_not_found off;
+    }
+
+    location ~* ^/images/.*\.(php|php5|phtml|pl)$ {
+        deny all;
+        return 403;
+    }
+
+    # Обработка статических файлов
+    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf)$ {
+        expires 30d;
+        add_header Cache-Control "public, immutable";
+        try_files \$uri \$uri/ =404;
+    }
+
+    # Главная location для MediaWiki
+    location / {
+        try_files \$uri \$uri/ @rewrite;
+    }
+
+    # Rewrite rules для MediaWiki
+    location @rewrite {
+        rewrite ^/(.*)\$ /index.php?title=\$1&\$args;
+    }
+
+    # Обработка PHP через наш FPM pool
+    location ~ \.php\$ {
+        include snippets/fastcgi-php.conf;
+        fastcgi_pass unix:/var/run/php/php${PHP_VERSION}-fpm-${PHP_POOL}.sock;
+        fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
+        include fastcgi_params;
+
+        # Безопасность для MediaWiki
+        fastcgi_param HTTP_PROXY "";
+        fastcgi_param MEDIAWIKI_ENV "production";
+    }
+
+    # Запрет доступа к служебным файлам
+    location ~ /(cache|includes|maintenance|languages|serialized|tests|vendor|composer\.json|composer\.lock|COPYING|CREDITS|INSTALL|README|RELEASE-NOTES) {
+        deny all;
+    }
+
+    # Дополнительная защита для конфигурационных файлов
+    location ~ /(LocalSettings|wiki\.config)\.php {
+        deny all;
+    }
+}
+EOF
+    fi
+    
     # Запускаем nginx обратно
     systemctl start nginx
 fi
 
-# Проверка конфигурации
-# Проверка конфигурации
-info "Проверка конфигурации..."
+# Финальная проверка конфигурации
+info "Финальная проверка конфигурации..."
 nginx -t
 systemctl status php${PHP_VERSION}-fpm > /dev/null && info "PHP-FPM запущен успешно" || critical_error "Ошибка PHP-FPM"
 
@@ -339,17 +428,18 @@ echo "Пароль: $DB_PASS"
 echo " "
 
 if [ "$SSL_ENABLED" = true ]; then
-    echo "Ваша вики доступна по адресу:"
-    echo "https://$DOMAIN_NAME/mw-config/"
+    echo "✅ Ваша вики доступна по защищенному адресу:"
+    echo "   https://$DOMAIN_NAME/mw-config/"
     echo " "
-    echo "SSL сертификат настроен и будет автоматически обновляться"
+    echo "🔒 SSL сертификат настроен и будет автоматически обновляться"
 else
-    echo "Ваша вики доступна по адресу:"
-    echo "http://$DOMAIN_NAME/mw-config/"
+    echo "🌐 Ваша вики доступна по адресу:"
+    echo "   http://$DOMAIN_NAME/mw-config/"
     echo " "
-    echo "SSL не настроен. Для продакшн-среды рекомендуется настроить SSL."
+    echo "⚠️  SSL не настроен. Для продакшн-среды рекомендуется настроить SSL."
 fi
 
+echo ""
 echo "После завершения установки через веб-интерфейс:"
 echo "1. Сохраните файл LocalSettings.php"
 echo "2. Загрузите его в директорию: $MW_DIR/"
@@ -358,7 +448,7 @@ echo "================================================================"
 
 # Дополнительные рекомендации по безопасности
 info "Дополнительные рекомендации по безопасности:"
-echo "1. Настройте регулярное резервное копирование базы данных и файлов"
-echo "2. Установите fail2ban для защиты от bruteforce атак"
-echo "3. Настройте мониторинг сервера"
-echo "4. Регулярно обновляйте MediaWiki и системные пакеты"
+echo "🔧 1. Настройте регулярное резервное копирование базы данных и файлов"
+echo "🛡️  2. Установите fail2ban для защиты от bruteforce атак"
+echo "📊 3. Настройте мониторинг сервера"
+echo "🔄 4. Регулярно обновляйте MediaWiki и системные пакеты"
