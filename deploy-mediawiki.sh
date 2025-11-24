@@ -131,7 +131,7 @@ EOF
 info "Настройка основного конфига Nginx..."
 if ! grep -q "ssl_session_cache" /etc/nginx/nginx.conf; then
     # Добавляем настройки SSL в основной конфиг, если их нет
-    sed -i '/http {/a\    ssl_session_cache shared:SSL:10m;\n    ssl_session_timeout 10m;' /etc/nginx/nginx.conf
+    sed -i '/http {/a\    ssl_session_cache shared:SSL:20m;\n    ssl_session_timeout 20m;' /etc/nginx/nginx.conf
 fi
 
 # Настройка виртуального хоста Nginx
@@ -294,49 +294,24 @@ find $MW_DIR -type f -exec chmod 644 {} \;
 ln -sf /etc/nginx/sites-available/mediawiki /etc/nginx/sites-enabled/
 rm -f /etc/nginx/sites-enabled/default
 
-# Проверка конфигурации перед перезапуском
-info "Проверка конфигурации Nginx..."
-if ! nginx -t; then
-    warning "Обнаружены ошибки в конфигурации Nginx. Пытаемся исправить..."
-    
-    # Резервное копирование и очистка конфликтующих конфигов
-    cp /etc/nginx/nginx.conf /etc/nginx/nginx.conf.backup
-    
-    # Упрощаем конфиг, убираем дублирующиеся настройки SSL
-    sed -i '/ssl_session_cache/d' /etc/nginx/nginx.conf
-    sed -i '/ssl_session_timeout/d' /etc/nginx/nginx.conf
-    
-    # Добавляем единую настройку SSL
-    if ! grep -q "ssl_session_cache" /etc/nginx/nginx.conf; then
-        sed -i '/http {/a\    ssl_session_cache shared:SSL:10m;\n    ssl_session_timeout 10m;' /etc/nginx/nginx.conf
-    fi
-    
-    # Проверяем еще раз
-    nginx -t
-fi
-
-# Перезапуск служб
-info "Перезапуск служб..."
-systemctl restart nginx php${PHP_VERSION}-fpm
-
 # Получение SSL сертификата
 if [ "$SSL_ENABLED" = true ]; then
     info "Получение SSL сертификата от Let's Encrypt..."
-    
+
     # Останавливаем nginx для certbot (standalone mode)
     systemctl stop nginx
-    
+
     # Получаем сертификат
     if certbot certonly --standalone -d $DOMAIN_NAME --non-interactive --agree-tos --email $EMAIL; then
         info "SSL сертификат успешно получен!"
-        
+
         # Настройка автоматического обновления сертификатов
         (crontab -l 2>/dev/null; echo "0 12 * * * /usr/bin/certbot renew --quiet && systemctl reload nginx") | crontab -
         info "Добавлена задача автоматического обновления SSL сертификатов"
     else
         warning "Не удалось получить SSL сертификат. Продолжаем без SSL..."
         SSL_ENABLED=false
-        
+
         # Убираем SSL конфиг если сертификат не получен
         cat > /etc/nginx/sites-available/mediawiki <<EOF
 server {
@@ -398,10 +373,14 @@ server {
 }
 EOF
     fi
-    
+
     # Запускаем nginx обратно
     systemctl start nginx
 fi
+
+# Перезапуск служб
+info "Перезапуск служб..."
+systemctl restart nginx php${PHP_VERSION}-fpm
 
 # Финальная проверка конфигурации
 info "Финальная проверка конфигурации..."
