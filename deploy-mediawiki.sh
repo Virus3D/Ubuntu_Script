@@ -302,7 +302,7 @@ if [ "$SSL_ENABLED" = true ]; then
     systemctl stop nginx
 
     # Получаем сертификат
-    if certbot certonly --standalone -d $DOMAIN_NAME --non-interactive --agree-tos --email $EMAIL; then
+    if certbot certonly --nginx -d $DOMAIN_NAME --non-interactive --agree-tos; then
         info "SSL сертификат успешно получен!"
 
         # Настройка автоматического обновления сертификатов
