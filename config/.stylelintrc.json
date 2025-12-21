@@ -1,9 +1,14 @@
 {
     "extends": "stylelint-config-standard",
+    "plugins": [
+        "@stylistic/stylelint-plugin"
+    ],
     "rules": {
-        "indentation": 4,
+        "@stylistic/indentation": 4,
+        "@stylistic/string-quotes": "single",
+        "@stylistic/block-opening-brace-newline-before": "always-multi-line",
         "selector-class-pattern": null,
-        "color-hex-case": "lower",
-        "number-leading-zero": "always"
+        "@stylistic/color-hex-case": "lower",
+        "@stylistic/number-leading-zero": "always"
     }
 }
