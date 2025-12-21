@@ -20,6 +20,7 @@ fi
 VPN_PORT="1194"
 VPN_PROTO="udp"
 VPN_SUBNET="10.8.0.0"
+VPN_SERVER="10.8.0.1"
 VPN_NETMASK="255.255.255.0"
 DNS1="8.8.8.8"
 DNS2="8.8.4.4"
@@ -167,9 +168,10 @@ key server/$SERVER_NAME.key
 dh dh.pem
 server $VPN_SUBNET $VPN_NETMASK
 ifconfig-pool-persist /var/log/openvpn/ipp.txt
-push "redirect-gateway def1 bypass-dhcp"
-push "dhcp-option DNS $DNS1"
-push "dhcp-option DNS $DNS2"
+
+push "route $VPN_SUBNET $VPN_NETMASK"
+push "dhcp-option DNS $VPN_SERVER"  # DNS сервера VPN
+
 keepalive 10 120
 tls-auth ta.key 0
 cipher AES-256-GCM
