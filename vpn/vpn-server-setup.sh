@@ -101,10 +101,10 @@ setup_easy_rsa() {
 
     # 2. Инициализируем PKI (очищаем старое при переустановке)
     if [ -d "pki" ]; then
-        warn "Обнаружена старая PKI. Очистка..."
-        ./easyrsa init-pki
+        warn "Обнаружена старая PKI. Автоматическая очистка и инициализация новой..."
+        echo "yes" | ./easyrsa init-pki > /dev/null 2>&1
     else
-        ./easyrsa init-pki
+        ./easyrsa init-pki > /dev/null 2>&1
     fi
 
     # 3. Создаем и настраиваем файл 'vars' для автоматической генерации
@@ -159,8 +159,20 @@ EOF
 
     # 7. Генерируем ключ TLS-auth для дополнительной безопасности
     log "Создание статического TLS-ключа..."
-    openvpn --genkey tls-crypt pki/ta.key
-    success "TLS-ключ создан: pki/ta.key"
+    OVPN_VERSION=$(openvpn --version 2>/dev/null | head -1 | grep -oP '[\d\.]+')
+
+    if [[ "$OVPN_VERSION" == 2.4* ]]; then
+        log "Определена OpenVPN версии 2.4.x, используется синтаксис '--genkey --secret'."
+        openvpn --genkey --secret pki/ta.key
+    else
+        log "Определена OpenVPN версии 2.5+, используется синтаксис '--genkey secret'."
+        openvpn --genkey secret pki/ta.key
+    fi
+
+    if [ ! -f "pki/ta.key" ]; then
+        error "Не удалось создать TLS-ключ."
+        exit 1
+    fi
 
     log "Генерация всех ключей и сертификатов успешно завершена."
 }
@@ -199,7 +211,9 @@ push "dhcp-option DNS $VPN_SERVER"  # DNS сервера VPN
 
 keepalive 10 120
 tls-auth ta.key 0
+tls-cipher "DEFAULT:@SECLEVEL=0"
 cipher AES-256-GCM
+data-ciphers AES-256-GCM
 auth SHA256
 user nobody
 group nogroup
