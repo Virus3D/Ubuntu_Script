@@ -159,7 +159,7 @@ EOF
 
     # 7. Генерируем ключ TLS-auth для дополнительной безопасности
     log "Создание статического TLS-ключа..."
-    openvpn --genkey secret pki/ta.key
+    openvpn --genkey tls-crypt pki/ta.key
     success "TLS-ключ создан: pki/ta.key"
 
     log "Генерация всех ключей и сертификатов успешно завершена."
