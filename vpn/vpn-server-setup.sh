@@ -31,6 +31,8 @@ BACKUP_DIR="/root/vpn-backup-$(date +%Y%m%d_%H%M%S)"
 log() { echo -e "${GREEN}[$(date '+%H:%M:%S')] $1${NC}"; }
 warn() { echo -e "${YELLOW}[!] $1${NC}"; }
 error() { echo -e "${RED}[ERROR] $1${NC}"; }
+success() { echo -e "${GREEN}[✓] $1${NC}"; }
+info() { echo -e "${BLUE}[i] $1${NC}"; }
 
 # Функция бэкапа существующей конфигурации
 backup_existing() {
@@ -126,7 +128,6 @@ set_var EASYRSA_CA_EXPIRE      3650
 set_var EASYRSA_CERT_EXPIRE    1080
 set_var EASYRSA_DIGEST         "sha256"
 EOF
-    fi
 
     # 4. Генерируем корневой сертификат (CA) в ПАКЕТНОМ РЕЖИМЕ
     # Это решает ошибку "Illegal option -o echo". Флаг 'nopass' делает ключ без пароля.
