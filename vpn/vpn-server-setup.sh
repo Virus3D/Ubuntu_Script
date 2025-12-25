@@ -84,9 +84,9 @@ install_packages() {
 
 # Настройка Easy-RSA
 setup_easy_rsa() {
-    log "Настройка инфраструктуры ключей..."
+    log "Настройка инфраструктуры ключей (PKI)..."
 
-    # Создаем директорию если её нет
+    # 1. Создаем и настраиваем директорию Easy-RSA
     mkdir -p "$EASY_RSA_DIR"
 
     # Копируем easy-rsa если не скопировано
@@ -97,11 +97,22 @@ setup_easy_rsa() {
 
     cd "$EASY_RSA_DIR"
 
-    # Инициализируем PKI только если это новая установка
-    if [ ! -d "pki" ]; then
+    # 2. Инициализируем PKI (очищаем старое при переустановке)
+    if [ -d "pki" ]; then
+        warn "Обнаружена старая PKI. Очистка..."
         ./easyrsa init-pki
+    else
+        ./easyrsa init-pki
+    fi
 
-        cat > vars << 'EOF'
+    # 3. Создаем и настраиваем файл 'vars' для автоматической генерации
+    # Это ключевое отличие: используем встроенную команду для создания шаблона
+    if [ ! -f "vars" ]; then
+        ./easyrsa make-vars > vars
+    fi
+
+    # Теперь редактируем файл 'vars', задавая нужные параметры
+    cat > vars << 'EOF'
 set_var EASYRSA_DN             "org"
 set_var EASYRSA_REQ_COUNTRY    "RU"
 set_var EASYRSA_REQ_PROVINCE   "Moscow"
@@ -113,31 +124,44 @@ set_var EASYRSA_KEY_SIZE       2048
 set_var EASYRSA_ALGO           rsa
 set_var EASYRSA_CA_EXPIRE      3650
 set_var EASYRSA_CERT_EXPIRE    1080
+set_var EASYRSA_DIGEST         "sha256"
 EOF
     fi
 
-    # Создаем или обновляем сертификаты
+    # 4. Генерируем корневой сертификат (CA) в ПАКЕТНОМ РЕЖИМЕ
+    # Это решает ошибку "Illegal option -o echo". Флаг 'nopass' делает ключ без пароля.
+    log "Генерация корневого сертификата CA (это может занять момент)..."
+    echo -e "\n" | ./easyrsa --batch build-ca nopass > /dev/null 2>&1
+
+    # Проверяем, что CA создался
     if [ ! -f "pki/ca.crt" ]; then
-        ./easyrsa build-ca nopass << EOF
-        OpenVPN CA
-EOF
+        error "Не удалось создать корневой сертификат CA. Проверьте права и наличие openssl."
+        exit 1
     fi
+    success "Корневой сертификат CA создан: pki/ca.crt"
+
+    # 5. Генерируем сертификат и ключ для сервера
+    log "Создание сертификата для сервера '$SERVER_NAME'..."
+    ./easyrsa --batch gen-req "$SERVER_NAME" nopass
+    ./easyrsa --batch sign-req server "$SERVER_NAME"
 
     if [ ! -f "pki/issued/$SERVER_NAME.crt" ]; then
-        ./easyrsa gen-req $SERVER_NAME nopass
-        echo "yes" | ./easyrsa sign-req server $SERVER_NAME
+        error "Не удалось создать сертификат сервера."
+        exit 1
     fi
+    success "Сертификат сервера создан: pki/issued/$SERVER_NAME.crt"
 
-    # Генерируем DH параметры если их нет
-    if [ ! -f "pki/dh.pem" ]; then
-        log "Генерация DH параметров (это может занять несколько минут)..."
-        ./easyrsa gen-dh
-    fi
+    # 6. Генерируем параметры Диффи-Хеллмана (это долгая операция)
+    log "Генерация параметров Диффи-Хеллмана (DH). Это займет несколько минут..."
+    ./easyrsa --batch gen-dh
+    success "Параметры DH созданы: pki/dh.pem"
 
-    # Создаем ключ TLS если его нет
-    if [ ! -f "pki/ta.key" ]; then
-        openvpn --genkey secret pki/ta.key
-    fi
+    # 7. Генерируем ключ TLS-auth для дополнительной безопасности
+    log "Создание статического TLS-ключа..."
+    openvpn --genkey secret pki/ta.key
+    success "TLS-ключ создан: pki/ta.key"
+
+    log "Генерация всех ключей и сертификатов успешно завершена."
 }
 
 # Настройка сервера OpenVPN
