@@ -213,7 +213,6 @@ keepalive 10 120
 tls-auth ta.key 0
 tls-cipher "DEFAULT:@SECLEVEL=0"
 cipher AES-256-GCM
-data-ciphers AES-256-GCM
 auth SHA256
 user nobody
 group nogroup
@@ -286,8 +285,8 @@ echo "yes" | ./easyrsa sign-req client "$CLIENT_NAME"
 cat > "/etc/openvpn/client-configs/files/$CLIENT_NAME.ovpn" << CLIENTEOF
 client
 dev tun
-proto udp
-remote $SERVER_IP 1194
+proto $VPN_PROTO
+remote $SERVER_IP $VPN_PORT
 resolv-retry infinite
 nobind
 persist-key
@@ -360,11 +359,107 @@ start_services() {
     fi
 }
 
+# 🔧 Функция для выбора порта с валидацией
+choose_port() {
+    local default_port=1194
+    local port
+    local is_valid=false
+
+    echo "=== Выбор порта для OpenVPN сервера ==="
+    echo "Стандартный порт: $default_port/udp"
+    echo "Альтернативные варианты:"
+    echo "  443/tcp  - часто не блокируется (похож на HTTPS)"
+    echo "  1194/udp - стандартный порт OpenVPN (по умолчанию)"
+    echo "  53/udp   - порт DNS (редко блокируется)"
+    echo ""
+
+    while [ "$is_valid" = false ]; do
+        read -p "Введите номер порта [$default_port]: " port
+        # Если пользователь просто нажал Enter, используем порт по умолчанию
+        if [ -z "$port" ]; then
+            port=$default_port
+        fi
+
+        # Проверяем, что порт - число от 1 до 65535
+        if [[ "$port" =~ ^[0-9]+$ ]] && [ "$port" -ge 1 ] && [ "$port" -le 65535 ]; then
+            # Проверяем, не занят ли порт системными сервисами
+            if [ "$port" -lt 1024 ]; then
+                read -p "Порт $port требует прав root. Продолжить? (y/N): " -n 1 -r
+                echo
+                if [[ $REPLY =~ ^[Yy]$ ]]; then
+                    is_valid=true
+                else
+                    continue
+                fi
+            else
+                is_valid=true
+            fi
+
+            # 🔧 НОВОЕ: Проверка, свободен ли порт
+            if command -v ss >/dev/null; then
+                if ss -tuln | grep -q ":$port\b"; then
+                    warn "Порт $port уже используется другим приложением!"
+                    read -p "Всё равно продолжить? (может вызвать конфликт) (y/N): " -n 1 -r
+                    echo
+                    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+                        is_valid=false
+                        continue
+                    fi
+                fi
+            fi
+        else
+            warn "Некорректный порт! Введите число от 1 до 65535."
+        fi
+    done
+
+    echo "$port"
+}
+
+# 🔧 Функция выбора протокола
+choose_protocol() {
+    local protocol
+    local is_valid=false
+
+    echo ""
+    echo "=== Выбор протокола ==="
+    echo "  udp - быстрее, лучше для VPN (по умолчанию)"
+    echo "  tcp - надежнее, обходит некоторые блокировки"
+
+    while [ "$is_valid" = false ]; do
+        read -p "Выберите протокол (udp/tcp) [udp]: " protocol
+        protocol=${protocol:-udp}  # Значение по умолчанию
+
+        case $protocol in
+            udp|UDP)
+                protocol="udp"
+                is_valid=true
+                ;;
+            tcp|TCP)
+                protocol="tcp"
+                is_valid=true
+                ;;
+            *)
+                warn "Некорректный протокол! Выберите 'udp' или 'tcp'."
+                ;;
+        esac
+    done
+
+    echo "$protocol"
+}
+
 # Основной процесс установки
 main() {
     echo -e "${BLUE}========================================${NC}"
     echo -e "${GREEN}  Установка/переустановка OpenVPN сервера ${NC}"
     echo -e "${BLUE}========================================${NC}"
+
+    VPN_PORT=$(choose_port)
+    VPN_PROTO=$(choose_protocol)
+
+    echo ""
+    echo -e "${GREEN}Выбрана конфигурация:${NC}"
+    echo "  Порт: $VPN_PORT/$VPN_PROTO"
+    echo ""
 
     # Бэкап старой конфигурации
     backup_existing
