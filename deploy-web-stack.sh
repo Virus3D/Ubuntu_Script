@@ -19,18 +19,27 @@ if ! grep -qiE 'debian|ubuntu' /etc/os-release 2>/dev/null; then
     exit 1
 fi
 
+. /etc/os-release
+OS_ID="${ID}"
+OS_VERSION="${VERSION_ID%%.*}"
+log_info "Обнаружена ОС: ${PRETTY_NAME}"
+
+# ========== ПАРАМЕТРЫ MYSQL ==========
+MYSQL_ROOT_PASS="${MYSQL_ROOT_PASS:-StrongPass!}"
+MYSQL_ADMIN_USER="admin"
+MYSQL_ADMIN_PASS="${MYSQL_ADMIN_PASS:-StrongPass!}"
+
 # ========== ФУНКЦИИ ПРОВЕРКИ ==========
 command_exists() { command -v "$1" &>/dev/null; }
 
 get_nginx_version()      { command_exists nginx    && nginx -v 2>&1 | grep -oP 'nginx/\K[0-9.]+' || true; }
 get_php_version()        { command_exists php      && php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null || true; }
-get_mysql_version()      { command_exists mysql    && mysql --version 2>/dev/null | grep -oP '\d+\.\d+\.\d+' || true; }
+get_mysql_version()      { command_exists mysql    && mysql --version 2>/dev/null | grep -oP '\d+\.\d+\.\d+' | head -1 || true; }
 get_composer_version()   { command_exists composer && composer --version 2>/dev/null | grep -oP '\d+\.\d+\.\d+' || true; }
 get_npm_version()        { command_exists npm      && npm --version 2>/dev/null || true; }
 get_phpmyadmin_version() {
     if dpkg -s phpmyadmin &>/dev/null; then
-        dpkg-query -W -f='${Version}' phpmyadmin 2>/dev/null \
-            | sed -E 's/^[0-9]+://; s/[-+~].*$//'
+        dpkg-query -W -f='${Version}' phpmyadmin 2>/dev/null | sed -E 's/^[0-9]+://; s/[-+~].*$//'
     fi
 }
 
@@ -76,11 +85,48 @@ else
     log_ok "PHP уже установлен: $CURRENT_PHP"
 fi
 
-# ========== MYSQL ==========
+# ========== MYSQL (Oracle, с fallback) ==========
 if [ -z "$CURRENT_MYSQL" ]; then
     log_info "Установка MySQL..."
-    sudo apt-get install -y mysql-server
-    sudo systemctl enable --now mysql
+
+    # Есть ли нативный mysql-server в репозитории?
+    if apt-cache show mysql-server &>/dev/null; then
+        log_ok "Пакет mysql-server найден в репозитории ${OS_ID}"
+        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y mysql-server
+    else
+        log_warn "Пакет mysql-server недоступен в ${OS_ID} ${OS_VERSION} — подключаю репозиторий Oracle"
+
+        # Установка вспомогательных утилит
+        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y wget gnupg lsb-release
+
+        # Скачиваем актуальный mysql-apt-config
+        MYSQL_APT_DEB_URL="https://dev.mysql.com/get/mysql-apt-config_0.8.33-1_all.deb"
+        cd /tmp
+        log_info "Скачивание mysql-apt-config..."
+        wget -q "${MYSQL_APT_DEB_URL}" -O mysql-apt-config.deb
+
+        # Пресеты debconf: выбираем mysql-8.4-lts, без интерактива
+        sudo debconf-set-selections <<< "mysql-apt-config mysql-apt-config/select-server select mysql-8.4-lts"
+        sudo debconf-set-selections <<< "mysql-apt-config mysql-apt-config/select-product select Ok"
+        sudo debconf-set-selections <<< "mysql-apt-config mysql-apt-config/select-tools select Enabled"
+
+        # Устанавливаем конфигуратор репозитория
+        sudo DEBIAN_FRONTEND=noninteractive dpkg -i mysql-apt-config.deb
+        rm -f mysql-apt-config.deb
+
+        log_info "Обновление индекса после добавления репозитория Oracle..."
+        sudo apt-get update -qq
+
+        # Пресеты для неинтерактивной установки mysql-community-server
+        sudo debconf-set-selections <<< "mysql-community-server mysql-community-server/root-pass password ${MYSQL_ROOT_PASS}"
+        sudo debconf-set-selections <<< "mysql-community-server mysql-community-server/re-root-pass password ${MYSQL_ROOT_PASS}"
+        sudo debconf-set-selections <<< "mysql-community-server mysql-server/default-auth-override select Use Strong Password Encryption (RECOMMENDED)"
+
+        log_info "Установка mysql-community-server (Oracle)..."
+        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y mysql-community-server
+    fi
+
+    sudo systemctl enable --now mysql 2>/dev/null || sudo systemctl enable --now mysqld 2>/dev/null || true
     log_ok "MySQL установлен: $(get_mysql_version)"
     log_warn "Запустите 'sudo mysql_secure_installation' для настройки безопасности"
 else
@@ -260,12 +306,12 @@ ADMIN_PASS="${MYSQL_ADMIN_PASS:-StrongPass!}"
 
 echo ""
 echo "=============================================="
-echo "         МЫSQL: СОЗДАНИЕ АДМИНА"
+echo "         MYSQL: СОЗДАНИЕ АДМИНА"
 echo "=============================================="
 echo ""
 log_info "SQL-инструкция для создания администратора MySQL:"
 echo ""
-echo "  sudo mysql"
+echo "  sudo mysql -u root -p"
 echo ""
 echo "  CREATE USER 'admin'@'localhost' IDENTIFIED BY 'StrongPass!';"
 echo "  GRANT ALL PRIVILEGES ON *.* TO 'admin'@'localhost' WITH GRANT OPTION;"
@@ -283,7 +329,7 @@ echo ""
 
 # Опциональное автосоздание
 if [ -z "${MYSQL_ADMIN_PASS:-}" ]; then
-    read -p "Создать пользователя '${ADMIN_USER}' автоматически с паролем '${ADMIN_PASS}'? [y/N] " -n 1 -r
+    read -p "Создать пользователя '${MYSQL_ADMIN_USER}' автоматически с паролем '${MYSQL_ADMIN_PASS}'? [y/N] " -n 1 -r
     echo
 else
     REPLY="y"
@@ -291,21 +337,22 @@ else
 fi
 
 if [[ "${REPLY:-N}" =~ ^[Yy]$ ]]; then
-    if sudo mysql <<SQL
-CREATE USER IF NOT EXISTS '${ADMIN_USER}'@'localhost' IDENTIFIED BY '${ADMIN_PASS}';
-ALTER USER '${ADMIN_USER}'@'localhost' IDENTIFIED BY '${ADMIN_PASS}';
-GRANT ALL PRIVILEGES ON *.* TO '${ADMIN_USER}'@'localhost' WITH GRANT OPTION;
+    # Пытаемся подключиться: сначала без пароля (auth_socket / свежий MySQL),
+    # затем с паролем root (mysql-community-server из Oracle)
+    if sudo mysql -uroot -p"${MYSQL_ROOT_PASS}" <<SQL 2>/dev/null || \
+       sudo mysql <<SQL 2>/dev/null
+CREATE USER IF NOT EXISTS '${MYSQL_ADMIN_USER}'@'localhost' IDENTIFIED BY '${MYSQL_ADMIN_PASS}';
+ALTER USER '${MYSQL_ADMIN_USER}'@'localhost' IDENTIFIED BY '${MYSQL_ADMIN_PASS}';
+GRANT ALL PRIVILEGES ON *.* TO '${MYSQL_ADMIN_USER}'@'localhost' WITH GRANT OPTION;
 FLUSH PRIVILEGES;
 SQL
     then
-        log_ok "Пользователь '${ADMIN_USER}'@'localhost' создан"
-        log_info "  Пароль: ${ADMIN_PASS}"
+        log_ok "Пользователь '${MYSQL_ADMIN_USER}'@'localhost' создан"
+        log_info "  Пароль: ${MYSQL_ADMIN_PASS}"
         log_info "  Вход в phpMyAdmin: http://${SERVER_IP}/phpmyadmin"
         log_warn "Смените пароль сразу после первого входа!"
-        log_info "  ALTER USER '${ADMIN_USER}'@'localhost' IDENTIFIED BY 'НовыйПароль';"
-        log_info "  FLUSH PRIVILEGES;"
     else
-        log_err "Не удалось создать пользователя. Проверьте, что MySQL запущен и root использует auth_socket."
+        log_err "Не удалось создать пользователя. Проверьте: sudo mysql -u root -p"
     fi
 else
     log_info "Пропущено. Выполните SQL-инструкцию выше вручную позже."
