@@ -64,13 +64,18 @@ class VariableNamingSniff implements Sniff
     private function isCamelCase($variableName)
     {
         // Убираем $ и проверяем формат
-        $nameWithoutDollar = substr($variableName, 1);
+        $name = substr($variableName, 1);
+
+        // Игнорируем первый '_', если он есть
+        if (str_starts_with($name, '_')) {
+            $name = substr($name, 1);
+        }
 
         // Допустимые паттерны:
         // - camelCase: $myVariable
         // - с подчеркиванием в тестах: $this_is_acceptable_in_tests
         // - UPPER_CASE для констант (но они обрабатываются другим сниффом)
 
-        return preg_match('/^[a-z][a-zA-Z0-9]*$/', $nameWithoutDollar) === 1;
+        return preg_match('/^[a-z][a-zA-Z0-9]*$/', $name) === 1;
     }
 }

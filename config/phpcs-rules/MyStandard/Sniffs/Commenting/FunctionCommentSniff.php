@@ -37,7 +37,7 @@ class FunctionCommentSniff extends SquizFunctionCommentSniff
             return;
         }
 
-        if ($function === '__construct') {
+        if ($function === '__construct' || preg_match('/^(set|get)[A-Z]/', $function)) {
             return;
         }
 

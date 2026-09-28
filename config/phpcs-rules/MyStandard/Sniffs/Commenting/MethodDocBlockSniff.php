@@ -10,7 +10,6 @@ class MethodDocBlockSniff implements Sniff
     public function register()
     {
         return [T_DOC_COMMENT_OPEN_TAG];
-
     }//end register()
 
     public function process(File $phpcsFile, $stackPtr)
@@ -27,6 +26,19 @@ class MethodDocBlockSniff implements Sniff
 
         $commentStart = $stackPtr;
         $commentEnd   = $tokens[$stackPtr]['comment_closer'];
+
+        // --- Новый блок: определение, относится ли комментарий к конструктору или set/get методу ---
+        $functionPtr = $phpcsFile->findNext(T_FUNCTION, $commentEnd + 1, null, false, null, true);
+        $isSpecialMethod = false;
+        if ($functionPtr !== false) {
+            $methodName = $phpcsFile->getDeclarationName($functionPtr);
+            if ($methodName !== null) {
+                if ($methodName === '__construct' || preg_match('/^(set|get)[A-Z]/', $methodName)) {
+                    $isSpecialMethod = true;
+                }
+            }
+        }
+        // ----------------------------------------------------------------------------------------
 
         // Проверяем наличие тега @inheritDoc
         $hasInheritDoc = false;
@@ -93,7 +105,8 @@ class MethodDocBlockSniff implements Sniff
         }
 
         // Check for a comment description.
-        if ($tokens[$short]['code'] !== T_DOC_COMMENT_STRING && !$hasInheritDoc) {
+        // Игнорируем отсутствие короткого описания у конструкторов и set/get методов
+        if ($tokens[$short]['code'] !== T_DOC_COMMENT_STRING && !$hasInheritDoc && !$isSpecialMethod) {
             $error = 'Missing short description in doc comment';
             $phpcsFile->addError($error, $stackPtr, 'MissingShort');
         } else if ($tokens[$short]['code'] === T_DOC_COMMENT_STRING) {
@@ -117,8 +130,7 @@ class MethodDocBlockSniff implements Sniff
                 }
             }
 
-            // Account for the fact that a short description might cover
-            // multiple lines.
+            // Account for the fact that a short description might cover multiple lines.
             $shortContent = $tokens[$short]['content'];
             $shortEnd     = $short;
             for ($i = ($short + 1); $i < $commentEnd; $i++) {
@@ -174,7 +186,8 @@ class MethodDocBlockSniff implements Sniff
             }
         }
 
-        if (!$hasInheritDoc && !$hasDescription) {
+        // Игнорируем отсутствие описания у конструкторов и set/get методов
+        if (!$hasInheritDoc && !$hasDescription && !$isSpecialMethod) {
             $error = 'Method doc comment must contain a description or @inheritDoc tag';
             $phpcsFile->addError($error, $stackPtr, 'MissingDescriptionOrInheritDoc');
         }

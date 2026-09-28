@@ -80,7 +80,7 @@
     <rule ref="Squiz.Arrays.ArrayBracketSpacing"/>
     <rule ref="Squiz.Arrays.ArrayDeclaration"/>
     <rule ref="Squiz.ControlStructures.ControlSignature"/>
-    <rule ref="Squiz.ControlStructures.ElseIfDeclaration"/>
+    <!-- <rule ref="Squiz.ControlStructures.ElseIfDeclaration"/> -->
     <rule ref="Squiz.Commenting.BlockComment">
         <exclude name="Squiz.Commenting.BlockComment.WrongStart"/>
     </rule>

@@ -1,14 +1,27 @@
 {
-    "extends": "stylelint-config-standard",
+    "extends": [
+        "stylelint-config-standard",
+        "stylelint-config-standard-less"
+    ],
     "plugins": [
         "@stylistic/stylelint-plugin"
     ],
     "rules": {
         "@stylistic/indentation": 4,
         "@stylistic/string-quotes": "single",
-        "@stylistic/block-opening-brace-newline-before": "always-multi-line",
+        "@stylistic/block-opening-brace-newline-before": "never-multi-line",
         "selector-class-pattern": null,
         "@stylistic/color-hex-case": "lower",
-        "@stylistic/number-leading-zero": "always"
+        "@stylistic/number-leading-zero": "never",
+        "alpha-value-notation": "number",
+        "color-function-alias-notation": "with-alpha",
+        "font-family-no-missing-generic-family-keyword": [
+            true,
+            {
+                "ignoreFontFamilies": [
+                    "FontAwesome"
+                ]
+            }
+        ]
     }
 }

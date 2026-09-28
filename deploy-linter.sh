@@ -113,6 +113,7 @@ install_npm_global "eslint"
 # Установка Stylelint (CSS)
 install_npm_global "stylelint"
 install_npm_global "stylelint-config-standard"
+install_npm_global "stylelint-config-standard-less"
 
 # Установка HTMLHint (HTML)
 install_npm_global "htmlhint"
@@ -148,6 +149,8 @@ install_composer_global "slam/phpstan-extensions"
 install_composer_global "shipmonk/phpstan-rules"
 install_composer_global "shipmonk/dead-code-detector"
 install_composer_global "staabm/phpstan-todo-by"
+install_composer_global "phpstan/phpstan-strict-rules"
+install_composer_global "phpstan/phpstan-symfony"
 
 # TwigCS
 install_composer_global "friendsoftwig/twigcs"
