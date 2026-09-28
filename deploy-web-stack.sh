@@ -22,7 +22,26 @@ fi
 . /etc/os-release
 OS_ID="${ID}"
 OS_VERSION="${VERSION_ID%%.*}"
+OS_CODENAME="${VERSION_CODENAME:-}"
 log_info "Обнаружена ОС: ${PRETTY_NAME}"
+
+# Fallback, если VERSION_CODENAME пуст (например, в некоторых сборках)
+if [ -z "$OS_CODENAME" ]; then
+    if command -v lsb_release &>/dev/null; then
+        OS_CODENAME=$(lsb_release -sc)
+    else
+        # Ручной маппинг для известных версий Debian
+        case "${OS_VERSION}" in
+            11) OS_CODENAME="bullseye" ;;
+            12) OS_CODENAME="bookworm" ;;
+            13) OS_CODENAME="trixie"   ;;
+            14) OS_CODENAME="forky"    ;;
+            *)  OS_CODENAME="stable"   ;;
+        esac
+    fi
+fi
+
+log_info "Кодовое имя: ${OS_CODENAME}"
 
 # ========== ПАРАМЕТРЫ MYSQL ==========
 MYSQL_ROOT_PASS="${MYSQL_ROOT_PASS:-StrongPass!}"
