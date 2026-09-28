@@ -143,13 +143,26 @@ if [ -z "$CURRENT_MYSQL" ]; then
         # --- Обновляем индекс ---
         log_info "Обновление индекса пакетов..."
         sudo apt-get update -qq
+        # Чистим устаревший pkgcache.bin, из-за которого apt-cache policy молчит
+        sudo rm -f /var/cache/apt/pkgcache.bin /var/cache/apt/srcpkgcache.bin
 
-        # --- Проверяем, что пакет реально появился ---
-        if ! apt-cache policy mysql-community-server 2>/dev/null | grep -q 'Candidate: [0-9]'; then
-            log_err "Не удалось подключить репозиторий Oracle — пакет mysql-community-server недоступен"
-            log_info "Проверьте вручную: cat /etc/apt/sources.list.d/mysql.list"
-            log_info "и: gpg --show-keys /usr/share/keyrings/mysql-apt-config.asc"
-            exit 1
+        # --- Проверяем ДОСТУПНОСТЬ через симуляцию установки ---
+        log_info "Проверка доступности mysql-community-server..."
+        if sudo apt-get install -y --dry-run mysql-community-server &>/dev/null; then
+            log_ok "Пакет mysql-community-server доступен для установки"
+        else
+            log_warn "Пакет не найден для ${OS_CODENAME} — переключаюсь на bookworm"
+            sudo sed -i "s|/debian/ ${OS_CODENAME} |/debian/ bookworm |" /etc/apt/sources.list.d/mysql.list
+            sudo apt-get update -qq
+            sudo rm -f /var/cache/apt/pkgcache.bin /var/cache/apt/srcpkgcache.bin
+
+            if ! sudo apt-get install -y --dry-run mysql-community-server &>/dev/null; then
+                log_err "Не удалось подключить репозиторий MySQL"
+                log_info "Проверьте вручную:"
+                log_info "  cat /etc/apt/sources.list.d/mysql.list"
+                log_info "  sudo apt-get install mysql-community-server"
+                exit 1
+            fi
         fi
 
         # --- Пресеты для неинтерактивной установки ---
