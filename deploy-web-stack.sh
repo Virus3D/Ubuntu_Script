@@ -89,17 +89,20 @@ fi
 if [ -z "$CURRENT_MYSQL" ]; then
     log_info "Установка MySQL..."
 
-    # Есть ли нативный mysql-server в репозитории?
-    if apt-cache show mysql-server &>/dev/null; then
-        log_ok "Пакет mysql-server найден в репозитории ${OS_ID}"
+    # Проверяем, есть ли РЕАЛЬНЫЙ кандидат на установку (не виртуальный пакет)
+    MYSQL_CANDIDATE=$(apt-cache policy mysql-server 2>/dev/null \
+        | awk '/Candidate:/{print $2; exit}')
+
+    if [ -n "$MYSQL_CANDIDATE" ] && [ "$MYSQL_CANDIDATE" != "(none)" ]; then
+        log_ok "Пакет mysql-server доступен в ${OS_ID}: кандидат ${MYSQL_CANDIDATE}"
         sudo DEBIAN_FRONTEND=noninteractive apt-get install -y mysql-server
     else
-        log_warn "Пакет mysql-server недоступен в ${OS_ID} ${OS_VERSION} — подключаю репозиторий Oracle"
+        log_warn "Пакет mysql-server отсутствует в ${OS_ID} ${OS_VERSION} — подключаю репозиторий Oracle"
 
         # Установка вспомогательных утилит
         sudo DEBIAN_FRONTEND=noninteractive apt-get install -y wget gnupg lsb-release
 
-        # Скачиваем актуальный mysql-apt-config
+        # Актуальная версия mysql-apt-config
         MYSQL_APT_DEB_URL="https://dev.mysql.com/get/mysql-apt-config_0.8.33-1_all.deb"
         cd /tmp
         log_info "Скачивание mysql-apt-config..."
@@ -117,6 +120,13 @@ if [ -z "$CURRENT_MYSQL" ]; then
         log_info "Обновление индекса после добавления репозитория Oracle..."
         sudo apt-get update -qq
 
+        # Проверяем, что пакет реально появился
+        if ! apt-cache policy mysql-community-server 2>/dev/null | grep -q 'Candidate: [0-9]'; then
+            log_err "Не удалось подключить репозиторий Oracle — пакет mysql-community-server недоступен"
+            log_info "Проверьте вручную: sudo dpkg -i mysql-apt-config_0.8.33-1_all.deb && sudo apt update"
+            exit 1
+        fi
+
         # Пресеты для неинтерактивной установки mysql-community-server
         sudo debconf-set-selections <<< "mysql-community-server mysql-community-server/root-pass password ${MYSQL_ROOT_PASS}"
         sudo debconf-set-selections <<< "mysql-community-server mysql-community-server/re-root-pass password ${MYSQL_ROOT_PASS}"
@@ -128,7 +138,6 @@ if [ -z "$CURRENT_MYSQL" ]; then
 
     sudo systemctl enable --now mysql 2>/dev/null || sudo systemctl enable --now mysqld 2>/dev/null || true
     log_ok "MySQL установлен: $(get_mysql_version)"
-    log_warn "Запустите 'sudo mysql_secure_installation' для настройки безопасности"
 else
     log_ok "MySQL уже установлен: $CURRENT_MYSQL"
 fi
