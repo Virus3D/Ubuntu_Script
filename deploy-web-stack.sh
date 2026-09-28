@@ -119,25 +119,25 @@ if [ -z "$CURRENT_MYSQL" ]; then
         log_warn "Пакет mysql-server отсутствует в ${OS_ID} ${OS_VERSION} — подключаю репозиторий Oracle"
 
         # --- Установка вспомогательных утилит ---
-        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y wget gnupg lsb-release
+        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y wget gnupg lsb-release curl
 
-        # --- Удаляем старый просроченный ключ (если есть) ---
+        # --- Удаляем старые ключи и источники ---
         log_info "Удаление старых ключей MySQL..."
         sudo rm -f /etc/apt/trusted.gpg.d/mysql2023.gpg
         sudo rm -f /usr/share/keyrings/mysql-apt-config.gpg
+        sudo rm -f /usr/share/keyrings/mysql-apt-config.asc
         sudo rm -f /etc/apt/sources.list.d/mysql.list
 
-        # --- Скачиваем и импортируем АКТУАЛЬНЫЙ ключ MySQL ---
-        log_info "Загрузка актуального GPG-ключа MySQL..."
+        # --- Скачиваем ASCII-armored ключ НАПРЯМУЮ (без gpg --dearmor) ---
+        log_info "Загрузка актуального GPG-ключа MySQL (ASCII-armored)..."
         sudo curl -fsSL \
-            "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0xB7B3B788A8D3785C" \
-            -o /tmp/mysql-fresh.asc
-        sudo gpg --dearmor -o /usr/share/keyrings/mysql-apt-config.gpg /tmp/mysql-fresh.asc
-        sudo rm -f /tmp/mysql-fresh.asc
+            "https://keyserver.ubuntu.com/pks/lookup?op=get&options=mr&search=0xB7B3B788A8D3785C" \
+            -o /usr/share/keyrings/mysql-apt-config.asc
+        sudo chmod +r /usr/share/keyrings/mysql-apt-config.asc
 
-        # --- Добавляем репозиторий Oracle с обновлённым ключом ---
-        log_info "Добавление репозитория MySQL 8.4 LTS..."
-        echo "deb [signed-by=/usr/share/keyrings/mysql-apt-config.gpg] http://repo.mysql.com/apt/debian/ ${OS_CODENAME} mysql-8.4-lts" \
+        # --- Добавляем репозиторий Oracle с ASCII-ключом ---
+        log_info "Добавление репозитория MySQL 8.4 LTS для ${OS_CODENAME}..."
+        echo "deb [signed-by=/usr/share/keyrings/mysql-apt-config.asc] http://repo.mysql.com/apt/debian/ ${OS_CODENAME} mysql-8.4-lts" \
             | sudo tee /etc/apt/sources.list.d/mysql.list > /dev/null
 
         # --- Обновляем индекс ---
@@ -147,8 +147,8 @@ if [ -z "$CURRENT_MYSQL" ]; then
         # --- Проверяем, что пакет реально появился ---
         if ! apt-cache policy mysql-community-server 2>/dev/null | grep -q 'Candidate: [0-9]'; then
             log_err "Не удалось подключить репозиторий Oracle — пакет mysql-community-server недоступен"
-            log_info "Проверьте вручную: ls -la /usr/share/keyrings/mysql-apt-config.gpg"
-            log_info " и: cat /etc/apt/sources.list.d/mysql.list"
+            log_info "Проверьте вручную: cat /etc/apt/sources.list.d/mysql.list"
+            log_info "и: gpg --show-keys /usr/share/keyrings/mysql-apt-config.asc"
             exit 1
         fi
 
